@@ -5,4 +5,5 @@ This is a demo server build around Java, Finagle, Netty threads ..... to demonst
 <h2>⚠️ Initialization Error</h2>
   <div class="empty-icon">⏱️</div>
   <div class="routine-card-chevron" aria-hidden="true">›</div>
+  <p><a href="#/">← Back home</a></p>
 
