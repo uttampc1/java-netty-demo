@@ -1,286 +1,56 @@
-// src/views/librarySection.js
+// src/views/settingsLibrary.js
 /**
- * HoldOn — Activity Library Section (used inside Settings)
+ * HoldOn — Settings → Activity Library (dedicated screen)
  * 
- * Renders the list of activities with edit/delete actions
- * and a "+ New Activity" button. Re-renders itself after changes.
- */
-
-import { getAllActivities, deleteActivity } from '../db/store.js';
-import { openExerciseEditor } from '../components/exerciseEditor.js';
-
-/**
- * Renders the library section into the given container.
- * @param {HTMLElement} container
- */
-export async function renderLibrarySection(container) {
-  const activities = await getAllActivities();
-  
-  if (activities.length === 0) {
-    container.innerHTML = `
-      <div class="library-empty">
-        <p class="muted">No activities in your library yet.</p>
-      </div>
-      <div class="library-footer">
-        <button type="button" class="btn btn-secondary library-new-btn" id="new-activity-btn">
-          <span class="btn-icon">+</span>
-          <span>New Activity</span>
-        </button>
-      </div>
-    `;
-  } else {
-    const itemsHtml = activities.map((a) => `
-      <div class="library-item" data-activity-id="${escapeHtml(a.id)}">
-        <button type="button" class="library-item-main" data-action="edit" data-activity-id="${escapeHtml(a.id)}">
-          <div class="library-item-content">
-            <div class="library-item-header">
-              <span class="library-item-name">${escapeHtml(a.name)}</span>
-              ${a.isSeeded ? '<span class="library-item-badge">Built-in</span>' : ''}
-            </div>
-            ${a.description ? `<div class="library-item-desc">${escapeHtml(a.description)}</div>` : ''}
-            <div class="library-item-meta">
-              ${a.defaultWorkDuration}s · ${a.defaultSets} set${a.defaultSets === 1 ? '' : 's'}${a.videoUrl ? ' · 🎬' : ''}
-            </div>
-          </div>
-          <div class="library-item-chevron">›</div>
-        </button>
-        <button
-          type="button"
-          class="btn-icon-only btn-icon-danger library-item-delete"
-          data-action="delete"
-          data-activity-id="${escapeHtml(a.id)}"
-          aria-label="Delete ${escapeHtml(a.name)}"
-        >✕</button>
-      </div>
-    `).join('');
-    
-    container.innerHTML = `
-      <div class="library-list">${itemsHtml}</div>
-      <div class="library-footer">
-        <button type="button" class="btn btn-secondary library-new-btn" id="new-activity-btn">
-          <span class="btn-icon">+</span>
-          <span>New Activity</span>
-        </button>
-      </div>
-    `;
-  }
-  
-  // Wire up edit handlers
-  container.querySelectorAll('[data-action="edit"]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const id = btn.dataset.activityId;
-      const activity = activities.find((a) => a.id === id);
-      if (activity) {
-        openExerciseEditor({
-          mode: 'editActivity',
-          activity,
-          onSave: async () => {
-            // Re-render the library to reflect changes
-            await renderLibrarySection(container);
-          },
-        });
-      }
-    });
-  });
-  
-  // Wire up delete handlers
-  container.querySelectorAll('[data-action="delete"]').forEach((btn) => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();  // prevent triggering the edit button
-      const id = btn.dataset.activityId;
-      const activity = activities.find((a) => a.id === id);
-      if (!activity) return;
-      
-      const confirmed = confirm(
-        `Delete "${activity.name}" from your library?\n\n` +
-        `Routines that use this activity will keep working — their copies are independent.`
-      );
-      if (!confirmed) return;
-      
-      try {
-        await deleteActivity(id);
-        await renderLibrarySection(container);
-      } catch (err) {
-        console.error('Failed to delete activity:', err);
-        alert('Failed to delete: ' + err.message);
-      }
-    });
-  });
-  
-  // Wire up "New Activity" button
-  container.querySelector('#new-activity-btn').addEventListener('click', () => {
-    openExerciseEditor({
-      mode: 'editActivity',
-      // No `activity` prop → create mode
-      onSave: async () => {
-        await renderLibrarySection(container);
-      },
-    });
-  });
-}
-
-function escapeHtml(str) {
-  if (str == null) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-
-// style.css
-/* === Step 1.4.F.2 — Library Management === */
-
-.library-empty {
-  padding: 24px 16px;
-  text-align: center;
-}
-
-.library-empty p {
-  margin: 0;
-}
-
-.library-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.library-item {
-  display: flex;
-  align-items: stretch;
-  border-bottom: 1px solid var(--border);
-  transition: background-color 0.15s ease;
-}
-
-.library-item:last-child {
-  border-bottom: none;
-}
-
-.library-item:hover {
-  background-color: rgba(0, 0, 0, 0.02);
-}
-
-@media (prefers-color-scheme: dark) {
-  .library-item:hover {
-    background-color: rgba(255, 255, 255, 0.03);
-  }
-}
-
-.library-item-main {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  background: none;
-  border: none;
-  padding: 14px 16px;
-  text-align: left;
-  font-family: inherit;
-  cursor: pointer;
-  min-width: 0;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.library-item-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.library-item-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 3px;
-}
-
-.library-item-name {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.library-item-badge {
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-muted);
-  background-color: rgba(0, 0, 0, 0.06);
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-@media (prefers-color-scheme: dark) {
-  .library-item-badge {
-    background-color: rgba(255, 255, 255, 0.1);
-  }
-}
-
-.library-item-desc {
-  font-size: 13px;
-  color: var(--text-muted);
-  margin-bottom: 4px;
-  display: -webkit-box;
-  -webkit-line-clamp: 1;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  line-height: 1.4;
-}
-
-.library-item-meta {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.library-item-chevron {
-  color: var(--text-muted);
-  font-size: 22px;
-  font-weight: 300;
-  margin-left: 8px;
-  flex-shrink: 0;
-}
-
-.library-item-delete {
-  align-self: center;
-  margin-right: 10px;
-  flex-shrink: 0;
-}
-
-.library-footer {
-  padding: 12px 16px 14px;
-  border-top: 1px solid var(--border);
-}
-
-.library-new-btn {
-  width: 100%;
-  justify-content: center;
-}
-
-/* Activity-mode note in editor */
-.editor-activity-note {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-// src/views/settings.js
-/**
- * HoldOn — Settings View
- * 
- * Top-level settings screen accessed from home (gear icon).
- * Sections:
- *   - Activity Library (manage seeded + custom activities) ✅ 1.4.F.2
- *   - Cue Defaults (global default cue settings)            ⏳ 1.4.F.3
- *   - Data (export/import)                                   ⏳ 1.4.F.3
- *   - About                                                  ⏳ 1.4.F.3
+ * Full-screen view for managing the activity library.
+ * Reuses renderLibrarySection() from views/librarySection.js.
  */
 
 import { router } from '../utils/router.js';
 import { renderLibrarySection } from './librarySection.js';
 
+export async function renderSettingsLibrary(container) {
+  container.innerHTML = `
+    <main class="container">
+      <header class="screen-header">
+        <button class="btn-link" id="back-btn">← Settings</button>
+        <h2>Activity Library</h2>
+        <div class="header-spacer"></div>
+      </header>
+
+      <section class="settings-section">
+        <div class="settings-card" id="library-card"></div>
+      </section>
+    </main>
+  `;
+
+  container.querySelector('#back-btn').addEventListener('click', () => {
+    router.navigate('/settings');
+  });
+
+  const libraryCard = container.querySelector('#library-card');
+  await renderLibrarySection(libraryCard);
+}
+
+// src/views/settings.js - entire content
+/**
+ * HoldOn — Settings View
+ * 
+ * Top-level settings screen accessed from home (gear icon).
+ * Sections:
+ *   - Activity Library (navigation row → dedicated screen)
+ *   - Cue Defaults                                          ⏳ 1.4.F.3.A
+ *   - Data (export/import/reset)                            ⏳ 1.4.F.3.B
+ *   - About                                                 ⏳ 1.4.F.3.C
+ */
+
+import { router } from '../utils/router.js';
+import { getAllActivities } from '../db/store.js';
+
 export async function renderSettings(container) {
+  const activities = await getAllActivities();
+  const activityCount = activities.length;
+
   container.innerHTML = `
     <main class="container">
       <header class="screen-header">
@@ -291,35 +61,106 @@ export async function renderSettings(container) {
 
       <section class="settings-section">
         <h3 class="settings-section-title">Activity Library</h3>
-        <div class="settings-card" id="library-card"></div>
+        <div class="settings-card">
+          <button type="button" class="settings-nav-row" id="library-nav">
+            <span class="settings-nav-label">Activity Library</span>
+            <span class="settings-nav-meta">
+              <span class="settings-nav-count">${activityCount}</span>
+              <span class="settings-nav-chevron">›</span>
+            </span>
+          </button>
+        </div>
       </section>
 
       <section class="settings-section">
         <h3 class="settings-section-title">Cue Defaults</h3>
         <div class="settings-card">
-          <p class="muted settings-placeholder">Cue settings coming in Step 1.4.F.3.</p>
+          <p class="muted settings-placeholder">Cue settings coming in Step 1.4.F.3.A.</p>
         </div>
       </section>
 
       <section class="settings-section">
         <h3 class="settings-section-title">Data</h3>
         <div class="settings-card">
-          <p class="muted settings-placeholder">Export / import coming in Step 1.4.F.3.</p>
+          <p class="muted settings-placeholder">Export / import coming in Step 1.4.F.3.B.</p>
         </div>
       </section>
 
       <section class="settings-section">
         <h3 class="settings-section-title">About</h3>
         <div class="settings-card">
-          <p class="muted settings-placeholder">About info coming in Step 1.4.F.3.</p>
+          <p class="muted settings-placeholder">About info coming in Step 1.4.F.3.C.</p>
         </div>
       </section>
     </main>
   `;
 
   container.querySelector('#back-btn').addEventListener('click', () => router.navigate('/'));
-  
-  // Render the library section
-  const libraryCard = container.querySelector('#library-card');
-  await renderLibrarySection(libraryCard);
+  container.querySelector('#library-nav').addEventListener('click', () => {
+    router.navigate('/settings/library');
+  });
+}
+
+/* === Settings Navigation Row (iOS-style) === */
+
+.settings-nav-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 14px 16px;
+  font-family: inherit;
+  font-size: 16px;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.settings-nav-row:hover {
+  background-color: rgba(0, 0, 0, 0.03);
+}
+
+@media (prefers-color-scheme: dark) {
+  .settings-nav-row:hover {
+    background-color: rgba(255, 255, 255, 0.04);
+  }
+}
+
+.settings-nav-row:active {
+  background-color: rgba(0, 0, 0, 0.06);
+}
+
+@media (prefers-color-scheme: dark) {
+  .settings-nav-row:active {
+    background-color: rgba(255, 255, 255, 0.08);
+  }
+}
+
+.settings-nav-label {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.settings-nav-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+}
+
+.settings-nav-count {
+  font-size: 15px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.settings-nav-chevron {
+  font-size: 20px;
+  font-weight: 300;
+  color: var(--text-muted);
+  line-height: 1;
 }
