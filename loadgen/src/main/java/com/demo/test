@@ -1,199 +1,325 @@
-// src/components/exerciseEditor.js
+// src/views/librarySection.js
 /**
- * HoldOn — Exercise Editor (Modal)
+ * HoldOn — Activity Library Section (used inside Settings)
  * 
- * Three modes:
- *   - 'edit'         : edit an existing exercise snapshot in a routine
- *   - 'create'       : create a new exercise for a routine (with "Save to library" toggle)
- *   - 'editActivity' : edit a library activity directly (or create new if !activity)
- * 
- * Usage:
- *   openExerciseEditor({ mode: 'edit', exercise, onSave: (snap) => {...} });
- *   openExerciseEditor({ mode: 'create', onSave: (snap) => {...} });
- *   openExerciseEditor({ mode: 'editActivity', activity, onSave: (activity) => {...} });
- *   openExerciseEditor({ mode: 'editActivity', onSave: (activity) => {...} }); // create new
+ * Renders the list of activities with edit/delete actions
+ * and a "+ New Activity" button. Re-renders itself after changes.
  */
 
-export function openExerciseEditor({ mode, exercise, activity, onSave }) {
-  const isCreate = mode === 'create';
-  const isActivityMode = mode === 'editActivity';
-  const isNewActivity = isActivityMode && !activity;
+import { getAllActivities, deleteActivity } from '../db/store.js';
+import { openExerciseEditor } from '../components/exerciseEditor.js';
+
+/**
+ * Renders the library section into the given container.
+ * @param {HTMLElement} container
+ */
+export async function renderLibrarySection(container) {
+  const activities = await getAllActivities();
   
-  // Working draft (changes only persist on Save)
-  // The draft uses the same field names regardless of mode for shared UI.
-  // In activity mode, we map back to activity fields on save.
-  let draft;
-  if (isCreate) {
-    draft = {
-      id: generateId(),
-      sourceActivityId: null,
-      snapshotVersion: Date.now(),
-      name: '',
-      description: '',
-      videoUrl: '',
-      workDuration: 30,
-      restBetweenSets: 10,
-      sets: 3,
-    };
-  } else if (isActivityMode) {
-    if (activity) {
-      // Editing existing activity — map activity fields to draft fields
-      draft = {
-        id: activity.id,
-        name: activity.name || '',
-        description: activity.description || '',
-        videoUrl: activity.videoUrl || '',
-        workDuration: activity.defaultWorkDuration ?? 30,
-        restBetweenSets: activity.defaultRestBetweenSets ?? 10,
-        sets: activity.defaultSets ?? 3,
-        _originalActivity: activity,  // keep reference for save
-      };
-    } else {
-      // Creating new activity
-      draft = {
-        id: null,  // will be assigned by createActivity
-        name: '',
-        description: '',
-        videoUrl: '',
-        workDuration: 30,
-        restBetweenSets: 10,
-        sets: 3,
-        _originalActivity: null,
-      };
-    }
+  if (activities.length === 0) {
+    container.innerHTML = `
+      <div class="library-empty">
+        <p class="muted">No activities in your library yet.</p>
+      </div>
+      <div class="library-footer">
+        <button type="button" class="btn btn-secondary library-new-btn" id="new-activity-btn">
+          <span class="btn-icon">+</span>
+          <span>New Activity</span>
+        </button>
+      </div>
+    `;
   } else {
-    // 'edit' mode — exercise snapshot
-    draft = { ...exercise };
+    const itemsHtml = activities.map((a) => `
+      <div class="library-item" data-activity-id="${escapeHtml(a.id)}">
+        <button type="button" class="library-item-main" data-action="edit" data-activity-id="${escapeHtml(a.id)}">
+          <div class="library-item-content">
+            <div class="library-item-header">
+              <span class="library-item-name">${escapeHtml(a.name)}</span>
+              ${a.isSeeded ? '<span class="library-item-badge">Built-in</span>' : ''}
+            </div>
+            ${a.description ? `<div class="library-item-desc">${escapeHtml(a.description)}</div>` : ''}
+            <div class="library-item-meta">
+              ${a.defaultWorkDuration}s · ${a.defaultSets} set${a.defaultSets === 1 ? '' : 's'}${a.videoUrl ? ' · 🎬' : ''}
+            </div>
+          </div>
+          <div class="library-item-chevron">›</div>
+        </button>
+        <button
+          type="button"
+          class="btn-icon-only btn-icon-danger library-item-delete"
+          data-action="delete"
+          data-activity-id="${escapeHtml(a.id)}"
+          aria-label="Delete ${escapeHtml(a.name)}"
+        >✕</button>
+      </div>
+    `).join('');
+    
+    container.innerHTML = `
+      <div class="library-list">${itemsHtml}</div>
+      <div class="library-footer">
+        <button type="button" class="btn btn-secondary library-new-btn" id="new-activity-btn">
+          <span class="btn-icon">+</span>
+          <span>New Activity</span>
+        </button>
+      </div>
+    `;
   }
   
-  // Local state for "save to library" toggle (only in 'create' mode)
-  let saveToLibrary = isCreate;
+  // Wire up edit handlers
+  container.querySelectorAll('[data-action="edit"]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.activityId;
+      const activity = activities.find((a) => a.id === id);
+      if (activity) {
+        openExerciseEditor({
+          mode: 'editActivity',
+          activity,
+          onSave: async () => {
+            // Re-render the library to reflect changes
+            await renderLibrarySection(container);
+          },
+        });
+      }
+    });
+  });
+  
+  // Wire up delete handlers
+  container.querySelectorAll('[data-action="delete"]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();  // prevent triggering the edit button
+      const id = btn.dataset.activityId;
+      const activity = activities.find((a) => a.id === id);
+      if (!activity) return;
+      
+      const confirmed = confirm(
+        `Delete "${activity.name}" from your library?\n\n` +
+        `Routines that use this activity will keep working — their copies are independent.`
+      );
+      if (!confirmed) return;
+      
+      try {
+        await deleteActivity(id);
+        await renderLibrarySection(container);
+      } catch (err) {
+        console.error('Failed to delete activity:', err);
+        alert('Failed to delete: ' + err.message);
+      }
+    });
+  });
+  
+  // Wire up "New Activity" button
+  container.querySelector('#new-activity-btn').addEventListener('click', () => {
+    openExerciseEditor({
+      mode: 'editActivity',
+      // No `activity` prop → create mode
+      onSave: async () => {
+        await renderLibrarySection(container);
+      },
+    });
+  });
+}
+
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 
-//-----
-      ${isCreate ? `
-        <div class="form-section-divider"></div>
-        <div class="form-group checkbox-group">
-          <label class="checkbox-label">
-            <input type="checkbox" id="ex-save-library" checked />
-            <span>Save to library for reuse in other routines</span>
-          </label>
+// style.css
+/* === Step 1.4.F.2 — Library Management === */
+
+.library-empty {
+  padding: 24px 16px;
+  text-align: center;
+}
+
+.library-empty p {
+  margin: 0;
+}
+
+.library-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.library-item {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border);
+  transition: background-color 0.15s ease;
+}
+
+.library-item:last-child {
+  border-bottom: none;
+}
+
+.library-item:hover {
+  background-color: rgba(0, 0, 0, 0.02);
+}
+
+@media (prefers-color-scheme: dark) {
+  .library-item:hover {
+    background-color: rgba(255, 255, 255, 0.03);
+  }
+}
+
+.library-item-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: none;
+  border: none;
+  padding: 14px 16px;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  min-width: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.library-item-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.library-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+
+.library-item-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.library-item-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  background-color: rgba(0, 0, 0, 0.06);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .library-item-badge {
+    background-color: rgba(255, 255, 255, 0.1);
+  }
+}
+
+.library-item-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.4;
+}
+
+.library-item-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.library-item-chevron {
+  color: var(--text-muted);
+  font-size: 22px;
+  font-weight: 300;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+.library-item-delete {
+  align-self: center;
+  margin-right: 10px;
+  flex-shrink: 0;
+}
+
+.library-footer {
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.library-new-btn {
+  width: 100%;
+  justify-content: center;
+}
+
+/* Activity-mode note in editor */
+.editor-activity-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+// src/views/settings.js
+/**
+ * HoldOn — Settings View
+ * 
+ * Top-level settings screen accessed from home (gear icon).
+ * Sections:
+ *   - Activity Library (manage seeded + custom activities) ✅ 1.4.F.2
+ *   - Cue Defaults (global default cue settings)            ⏳ 1.4.F.3
+ *   - Data (export/import)                                   ⏳ 1.4.F.3
+ *   - About                                                  ⏳ 1.4.F.3
+ */
+
+import { router } from '../utils/router.js';
+import { renderLibrarySection } from './librarySection.js';
+
+export async function renderSettings(container) {
+  container.innerHTML = `
+    <main class="container">
+      <header class="screen-header">
+        <button class="btn-link" id="back-btn">← Back</button>
+        <h2>Settings</h2>
+        <div class="header-spacer"></div>
+      </header>
+
+      <section class="settings-section">
+        <h3 class="settings-section-title">Activity Library</h3>
+        <div class="settings-card" id="library-card"></div>
+      </section>
+
+      <section class="settings-section">
+        <h3 class="settings-section-title">Cue Defaults</h3>
+        <div class="settings-card">
+          <p class="muted settings-placeholder">Cue settings coming in Step 1.4.F.3.</p>
         </div>
-      ` : ''}
-      ${isActivityMode ? `
-        <div class="form-section-divider"></div>
-        <p class="form-hint editor-activity-note">
-          These are the default values used when adding this activity to a routine.
-          You can override them per-routine.
-        </p>
-      ` : ''}
-    </form>
-    
-    <div class="editor-actions">
-      <button type="button" class="btn btn-secondary" id="ex-cancel">Cancel</button>
-      <button type="button" class="btn btn-primary" id="ex-save">
-        ${getSaveButtonLabel(mode, isNewActivity)}
-      </button>
-    </div>
+      </section>
+
+      <section class="settings-section">
+        <h3 class="settings-section-title">Data</h3>
+        <div class="settings-card">
+          <p class="muted settings-placeholder">Export / import coming in Step 1.4.F.3.</p>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <h3 class="settings-section-title">About</h3>
+        <div class="settings-card">
+          <p class="muted settings-placeholder">About info coming in Step 1.4.F.3.</p>
+        </div>
+      </section>
+    </main>
   `;
+
+  container.querySelector('#back-btn').addEventListener('click', () => router.navigate('/'));
   
-  const modal = openModal({
-    title: getModalTitle(mode, isNewActivity),
-    content,
-  });
-  
-  wireUpEditor(content, modal, draft, mode, () => saveToLibrary, (v) => { saveToLibrary = v; }, onSave);
+  // Render the library section
+  const libraryCard = container.querySelector('#library-card');
+  await renderLibrarySection(libraryCard);
 }
-
-function getModalTitle(mode, isNewActivity) {
-  if (mode === 'create') return 'New Exercise';
-  if (mode === 'editActivity') return isNewActivity ? 'New Activity' : 'Edit Activity';
-  return 'Edit Exercise';
-}
-
-function getSaveButtonLabel(mode, isNewActivity) {
-  if (mode === 'create') return 'Add Exercise';
-  if (mode === 'editActivity') return isNewActivity ? 'Create Activity' : 'Save Activity';
-  return 'Save Changes';
-}
-
-// ---- 
-    saveBtn.disabled = true;
-    saveBtn.textContent = 'Saving...';
-    
-    try {
-      if (isActivityMode) {
-        // Activity mode — map draft back to activity fields and save
-        const activityData = {
-          name: draft.name,
-          description: draft.description,
-          videoUrl: draft.videoUrl,
-          defaultWorkDuration: draft.workDuration,
-          defaultRestBetweenSets: draft.restBetweenSets,
-          defaultSets: draft.sets,
-        };
-        
-        let savedActivity;
-        if (draft._originalActivity) {
-          // Update existing activity (preserve id, isSeeded, tags, metadata, createdAt)
-          savedActivity = await updateActivity({
-            ...draft._originalActivity,
-            ...activityData,
-          });
-        } else {
-          // Create new activity
-          savedActivity = await createActivity({
-            ...activityData,
-            isSeeded: false,
-          });
-        }
-        
-        closeModal(modal);
-        setTimeout(() => {
-          if (typeof onSave === 'function') {
-            onSave(savedActivity);
-          }
-        }, 100);
-      } else {
-        // Routine snapshot mode ('edit' or 'create')
-        // If creating new + "save to library" is checked, create library activity
-        if (isCreate && getSaveToLibrary()) {
-          const newActivity = await createActivity({
-            name: draft.name,
-            description: draft.description,
-            videoUrl: draft.videoUrl,
-            defaultWorkDuration: draft.workDuration,
-            defaultRestBetweenSets: draft.restBetweenSets,
-            defaultSets: draft.sets,
-            isSeeded: false,
-          });
-          draft.sourceActivityId = newActivity.id;
-          draft.snapshotVersion = newActivity.updatedAt;
-        }
-        
-        closeModal(modal);
-        setTimeout(() => {
-          if (typeof onSave === 'function') {
-            onSave(draft, { saveToLibrary: isCreate && getSaveToLibrary() });
-          }
-        }, 100);
-      }
-    } catch (err) {
-      console.error('Failed to save:', err);
-      alert('Failed to save: ' + err.message);
-      saveBtn.disabled = false;
-      // Restore the right label based on mode
-      if (isActivityMode) {
-        saveBtn.textContent = draft._originalActivity ? 'Save Activity' : 'Create Activity';
-      } else {
-        saveBtn.textContent = isCreate ? 'Add Exercise' : 'Save Changes';
-      }
-    }
-  });
-
-// src/components/exerciseEditor.js
-import { openModal, closeModal } from './modal.js';
-import { createActivity, updateActivity } from '../db/store.js';
-import { generateId } from '../utils/id.js';
-
-// 
