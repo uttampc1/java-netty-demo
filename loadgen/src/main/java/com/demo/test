@@ -1,64 +1,4 @@
-// ============================================================
-// EXPORT
-// ============================================================
-
-async function handleExport() {
-  try {
-    const data = await exportAllData();
-    const date = new Date().toISOString().split('T')[0];
-    const filename = `holdon-backup-${date}.json`;
-    const jsonString = JSON.stringify(data, null, 2);
-    
-    // Try Web Share API first (works great on iOS Safari + Android)
-    if (canShareFiles()) {
-      const file = new File([jsonString], filename, { type: 'application/json' });
-      if (navigator.canShare({ files: [file] })) {
-        try {
-          await navigator.share({
-            files: [file],
-            title: 'HoldOn Backup',
-          });
-          console.log('[Data] Shared via Web Share API');
-          return;
-        } catch (shareErr) {
-          // User cancelled share, OR share failed — fall through to download
-          if (shareErr.name !== 'AbortError') {
-            console.warn('[Data] Share failed, falling back to download:', shareErr);
-          } else {
-            return;  // User cancelled, don't auto-fallback
-          }
-        }
-      }
-    }
-    
-    // iOS non-Safari: download won't work, show copy/share modal
-    if (isIOSNonSafari()) {
-      showIOSExportFallback(jsonString, filename);
-      return;
-    }
-    
-    // Standard download (desktop + iOS Safari + Android)
-    triggerDownload(jsonString, filename);
-    console.log('[Data] Exported:', filename);
-  } catch (err) {
-    console.error('[Data] Export failed:', err);
-    alert('Export failed: ' + err.message);
-  }
-}
-
-function triggerDownload(jsonString, filename) {
-  const blob = new Blob([jsonString], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
+// src/views/dataSection.js
 
 function showIOSExportFallback(jsonString, filename) {
   const content = document.createElement('div');
@@ -71,14 +11,25 @@ function showIOSExportFallback(jsonString, filename) {
     
     <div class="ios-export-option">
       <h4>Option 1: Copy to Clipboard</h4>
-      <p class="muted">Then paste into Notes, Files, or any text editor.</p>
+      <p class="muted">Tap the button to copy. If it fails, use Option 2 below.</p>
       <button type="button" class="btn btn-primary" id="copy-btn">
         📋 Copy Backup Data
       </button>
     </div>
     
+    <div class="ios-export-option" id="manual-copy-section" hidden>
+      <h4>Option 2: Copy Manually</h4>
+      <p class="muted">Tap into the box, Select All, then Copy.</p>
+      <textarea
+        class="ios-export-textarea"
+        id="manual-copy-textarea"
+        readonly
+        rows="6"
+      >${escapeHtml(jsonString)}</textarea>
+    </div>
+    
     <div class="ios-export-option">
-      <h4>Option 2: Use Safari</h4>
+      <h4>Option 3: Use Safari</h4>
       <p class="muted">Open this app in Safari for full download support.</p>
     </div>
     
@@ -93,91 +44,91 @@ function showIOSExportFallback(jsonString, filename) {
     content,
   });
   
-  // Copy to clipboard handler
   const copyBtn = content.querySelector('#copy-btn');
+  const manualSection = content.querySelector('#manual-copy-section');
+  const manualTextarea = content.querySelector('#manual-copy-textarea');
+  
   copyBtn.addEventListener('click', async () => {
+    let copied = false;
+    
+    // Strategy 1: Modern Clipboard API
     try {
-      await navigator.clipboard.writeText(jsonString);
+      if (typeof navigator !== 'undefined' 
+          && navigator.clipboard 
+          && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(jsonString);
+        copied = true;
+      }
+    } catch (err) {
+      console.warn('[Data] Clipboard API failed:', err);
+    }
+    
+    // Strategy 2: Legacy execCommand fallback
+    if (!copied) {
+      try {
+        const tempTextarea = document.createElement('textarea');
+        tempTextarea.value = jsonString;
+        tempTextarea.style.position = 'fixed';
+        tempTextarea.style.top = '0';
+        tempTextarea.style.left = '0';
+        tempTextarea.style.opacity = '0';
+        document.body.appendChild(tempTextarea);
+        tempTextarea.focus();
+        tempTextarea.select();
+        copied = document.execCommand('copy');
+        document.body.removeChild(tempTextarea);
+      } catch (err) {
+        console.warn('[Data] execCommand fallback failed:', err);
+      }
+    }
+    
+    if (copied) {
       copyBtn.textContent = '✅ Copied!';
       copyBtn.disabled = true;
+      setTimeout(() => closeModal(modal), 1500);
+    } else {
+      // Both strategies failed — show manual copy textarea
+      copyBtn.textContent = '⚠️ Use Option 2 below';
+      copyBtn.disabled = true;
+      manualSection.hidden = false;
+      
+      // Auto-select the textarea content for easier manual copy
       setTimeout(() => {
-        closeModal(modal);
-      }, 1500);
-    } catch (err) {
-      console.error('[Data] Clipboard write failed:', err);
-      // Fallback for browsers without clipboard API
-      copyBtn.textContent = '⚠️ Copy failed — see console';
-      console.log('=== HOLDON BACKUP (copy manually) ===');
-      console.log(jsonString);
+        manualTextarea.focus();
+        manualTextarea.select();
+      }, 100);
     }
   });
 }
 
-function escapeHtml(str) {
-  if (str == null) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
+// 
+/* === iOS Export — Manual Copy Textarea === */
 
-// styles
-/* === iOS Export Fallback Modal === */
-
-.ios-export-fallback {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.ios-export-intro {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-.ios-export-option {
-  background-color: var(--bg-elevated);
-  border-radius: var(--radius-sm);
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-}
-
-.ios-export-option h4 {
-  margin: 0 0 4px 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.ios-export-option p {
-  margin: 0 0 10px 0;
-  font-size: 13px;
-  line-height: 1.4;
-}
-
-.ios-export-option p:last-child {
-  margin-bottom: 0;
-}
-
-.ios-export-option button {
+.ios-export-textarea {
   width: 100%;
-  justify-content: center;
+  padding: 10px 12px;
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text);
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  resize: vertical;
+  min-height: 80px;
+  max-height: 200px;
+  -webkit-appearance: none;
+  appearance: none;
+  outline: none;
 }
 
-.ios-export-filename code {
-  display: inline-block;
-  background-color: rgba(0, 0, 0, 0.06);
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
-  font-size: 13px;
+.ios-export-textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
 }
 
 @media (prefers-color-scheme: dark) {
-  .ios-export-filename code {
-    background-color: rgba(255, 255, 255, 0.1);
+  .ios-export-textarea:focus {
+    box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.25);
   }
 }
