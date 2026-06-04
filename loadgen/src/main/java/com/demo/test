@@ -1,297 +1,199 @@
-# 🔒 Restricting Vite Dev Server to Local Network Only — Great Security Question
-
-Excellent instinct! By default, `--host` exposes the dev server to **any device that can reach your machine**, which on most home networks is fine, but **defense-in-depth** is always smart. Let me show you the proper way to restrict it.
-
----
-
-## 🎯 The Goal
-
-Allow connections **only from** `192.168.1.0/24` (your local home network) and **block** everything else, including:
-- Other subnets (if your machine is on multiple networks)
-- VPN traffic
-- Docker bridge networks
-- Any unexpected interfaces
-
----
-
-## 🛠️ Setting Up UFW Rules
-
-### Step 1: Check Current UFW Status
-
-```bash
-sudo ufw status verbose
-```
-
-**Three possible outputs:**
-
-#### Output A: "Status: inactive"
-UFW is installed but not enabled. We'll enable it carefully (see Step 2).
-
-#### Output B: "Status: active" with existing rules
-UFW is on. We just add our rule.
-
-#### Output C: "ufw: command not found"
-Install it:
-```bash
-sudo apt install ufw
-```
-
----
-
-### Step 2: ⚠️ IMPORTANT — Before Enabling UFW
-
-**If UFW is currently inactive and you're on SSH, READ THIS FIRST.** Enabling UFW with default deny rules can lock you out if you're SSH'd in. Since you're on a desktop (not SSH), this is less of a concern, but it's worth knowing.
-
-**Safe defaults to set BEFORE enabling:**
-
-```bash
-# Allow outgoing connections (so your browser still works)
-sudo ufw default allow outgoing
-
-# Deny incoming by default (the secure stance)
-sudo ufw default deny incoming
-```
-
-Then if you need SSH access from your LAN, allow it:
-```bash
-sudo ufw allow from 192.168.1.0/24 to any port 22 proto tcp
-```
-
----
-
-### Step 3: Add the Rule for Vite (Port 5173)
-
-This is the key rule — allow port 5173 ONLY from your local subnet:
-
-```bash
-sudo ufw allow from 192.168.1.0/24 to any port 5173 proto tcp
-```
-
-**Breakdown:**
-- `from 192.168.1.0/24` — only from devices on your `192.168.1.x` subnet (the `/24` means addresses `.0` through `.255`)
-- `to any` — to any IP address on your machine (covers all your network interfaces)
-- `port 5173` — the Vite dev server port
-- `proto tcp` — TCP only (Vite doesn't use UDP)
-
-You should see: `Rule added`.
-
----
-
-### Step 4: Enable UFW (if not already)
-
-```bash
-sudo ufw enable
-```
-
-You'll see a warning about potentially disrupting connections. Since you're on a desktop, just type **`y`** and press Enter.
-
----
-
-### Step 5: Verify the Rules
-
-```bash
-sudo ufw status numbered
-```
-
-**You should see something like:**
-```
-Status: active
-
-     To                         Action      From
-     --                         ------      ----
-[ 1] 5173/tcp                   ALLOW IN    192.168.1.0/24
-```
-
-If you also added the SSH rule earlier:
-```
-[ 1] 22/tcp                     ALLOW IN    192.168.1.0/24
-[ 2] 5173/tcp                   ALLOW IN    192.168.1.0/24
-```
-
----
-
-## ✅ Test the Setup
-
-### Test 1: Can your iPhone still reach Vite?
-
-On your iPhone Safari, navigate to:
-```
-http://192.168.1.x:5173/
-```
-(use your actual IP)
-
-**Expected:** Loads normally. ✅
-
-### Test 2: Can localhost still reach Vite?
-
-On the Debian machine itself:
-```bash
-curl -I http://localhost:5173/
-```
-**Expected:** Returns headers (200 OK). 
-
-> 💡 Localhost traffic uses the `lo` interface, which UFW doesn't block by default.
-
-### Test 3: Verify the rule is restrictive (advanced — only if curious)
-
-If you have access to another device on a **different network** (e.g., your phone on cellular data, not WiFi), you could test that they cannot reach `http://<your-public-ip>:5173/`. But this requires knowing your public IP and is mostly academic — most home routers don't expose dev ports to the internet anyway.
-
----
-
-## 🔧 Useful UFW Commands
-
-### List rules with numbers (for deletion)
-```bash
-sudo ufw status numbered
-```
-
-### Delete a rule by number
-```bash
-sudo ufw delete 2
-```
-
-### Reset all rules (start over)
-```bash
-sudo ufw reset
-# Then re-add the rules you want
-```
-
-### Disable UFW entirely
-```bash
-sudo ufw disable
-```
-
-### See what's blocked (logs)
-```bash
-sudo ufw logging on   # turn on logging
-sudo tail -f /var/log/ufw.log
-```
-
----
-
-## 🤔 What If Your Network Uses a Different Subnet?
-
-Some home networks use:
-- `192.168.0.0/24` (different second octet)
-- `192.168.1.0/24` (most common)
-- `10.0.0.0/24` (sometimes routers/ISPs)
-- `172.16.x.x` to `172.31.x.x` (less common at home)
-
-**To check your actual subnet:**
-
-```bash
-ip addr show | grep "inet " | grep -v 127.0.0.1
-```
-
-Look for output like:
-```
-inet 192.168.1.42/24 brd 192.168.1.255 scope global dynamic noprefixroute wlp3s0
-                ^^^
-                This /24 means subnet 192.168.1.0/24
-```
-
-**If your IP is `192.168.0.42`** → use `192.168.0.0/24` instead of `192.168.1.0/24`:
-```bash
-sudo ufw allow from 192.168.0.0/24 to any port 5173 proto tcp
-```
-
-**If your IP is `10.0.1.42`** → use `10.0.0.0/24` (or wider `10.0.0.0/8` for any 10.x network):
-```bash
-sudo ufw allow from 10.0.0.0/24 to any port 5173 proto tcp
-```
-
----
-
-## 📋 Quick Recipe (Copy/Paste Ready)
-
-Here's the **complete sequence** assuming standard home network `192.168.1.0/24`:
-
-```bash
-# 1. Check what subnet you're on
-ip addr show | grep "inet " | grep -v 127.0.0.1
-# (confirm the IP, e.g., 192.168.1.42)
-
-# 2. Install UFW if missing
-sudo apt install ufw
-
-# 3. Set safe defaults
-sudo ufw default deny incoming
-sudo ufw default allow outgoing
-
-# 4. Allow Vite from local subnet only
-sudo ufw allow from 192.168.1.0/24 to any port 5173 proto tcp
-
-# 5. (Optional) Allow SSH from local subnet
-# sudo ufw allow from 192.168.1.0/24 to any port 22 proto tcp
-
-# 6. Enable UFW
-sudo ufw enable
-
-# 7. Verify
-sudo ufw status numbered
-```
-
----
-
-## 💡 Future Considerations
-
-### When you add more dev servers
-Each new tool (Vite, Storybook, backend API, etc.) usually picks an unused port. Just add a rule for each:
-```bash
-sudo ufw allow from 192.168.1.0/24 to any port 3000 proto tcp   # Next.js, etc.
-sudo ufw allow from 192.168.1.0/24 to any port 8080 proto tcp   # Common API port
-```
-
-### For production
-None of this matters — Cloudflare Pages handles HTTPS, edge servers, DDoS protection, etc. UFW is just for local dev safety.
-
-### For travel / coffee shops
-On untrusted networks (airport WiFi, etc.), even `192.168.1.0/24` could be shared with strangers. In those cases:
-- Disable UFW rule temporarily: `sudo ufw delete <rule-number>`
-- Or use Vite's `--host localhost` (which we have by default when not using `--host`)
-
----
-
-## ✋ Try It Out
-
-1. Run the diagnostic command to confirm your subnet
-2. Apply the rules above
-3. Verify iPhone can still access the dev server
-4. Verify `sudo ufw status numbered` shows your rule
-
-Reply with:
-
-### ✅ If working:
-- "UFW configured, iPhone can still reach Vite"
-- Any observations from testing on iPhone (if you got that far)
-
-### 🤔 Issues:
-- Different subnet than expected?
-- iPhone can't reach?
-- UFW errors?
-
-Then we'll continue with **Step 1.4.F.2: Activity Library Management** — once you've had a chance to play with the app on iPhone and confirm everything looks good. 🚀
-
----
-
-## 📋 Where We Are
-
-```
-✅ Step 1.1 — 1.4.F.1 (with secure iPhone testing setup)
-⬜ 1.4.F.2: Activity Library Management ← NEXT (waiting for your go)
-⬜ 1.4.F.3: Cue Defaults + Data + About
-⬜ 1.4.G: Drag-Reorder + Confirmation Modals
-⬜ Step 1.5: Deploy to Cloudflare Pages
-```
-
-## 🎓 Security Lesson Embedded
-
-What you just did is a microcosm of good security practice:
-- ✅ **Principle of least privilege** — only allow what's needed
-- ✅ **Network segmentation** — restrict to known trusted network
-- ✅ **Defense in depth** — even if your router has issues, UFW provides another layer
-- ✅ **Default deny** — block by default, allow specifically
-
-This same mindset applies to production apps: in v3+ when we add auth, we'll apply similar "default deny, allow specific" patterns to user permissions. 👏
-
-Enjoy testing on iPhone!
+// src/components/exerciseEditor.js
+/**
+ * HoldOn — Exercise Editor (Modal)
+ * 
+ * Three modes:
+ *   - 'edit'         : edit an existing exercise snapshot in a routine
+ *   - 'create'       : create a new exercise for a routine (with "Save to library" toggle)
+ *   - 'editActivity' : edit a library activity directly (or create new if !activity)
+ * 
+ * Usage:
+ *   openExerciseEditor({ mode: 'edit', exercise, onSave: (snap) => {...} });
+ *   openExerciseEditor({ mode: 'create', onSave: (snap) => {...} });
+ *   openExerciseEditor({ mode: 'editActivity', activity, onSave: (activity) => {...} });
+ *   openExerciseEditor({ mode: 'editActivity', onSave: (activity) => {...} }); // create new
+ */
+
+export function openExerciseEditor({ mode, exercise, activity, onSave }) {
+  const isCreate = mode === 'create';
+  const isActivityMode = mode === 'editActivity';
+  const isNewActivity = isActivityMode && !activity;
+  
+  // Working draft (changes only persist on Save)
+  // The draft uses the same field names regardless of mode for shared UI.
+  // In activity mode, we map back to activity fields on save.
+  let draft;
+  if (isCreate) {
+    draft = {
+      id: generateId(),
+      sourceActivityId: null,
+      snapshotVersion: Date.now(),
+      name: '',
+      description: '',
+      videoUrl: '',
+      workDuration: 30,
+      restBetweenSets: 10,
+      sets: 3,
+    };
+  } else if (isActivityMode) {
+    if (activity) {
+      // Editing existing activity — map activity fields to draft fields
+      draft = {
+        id: activity.id,
+        name: activity.name || '',
+        description: activity.description || '',
+        videoUrl: activity.videoUrl || '',
+        workDuration: activity.defaultWorkDuration ?? 30,
+        restBetweenSets: activity.defaultRestBetweenSets ?? 10,
+        sets: activity.defaultSets ?? 3,
+        _originalActivity: activity,  // keep reference for save
+      };
+    } else {
+      // Creating new activity
+      draft = {
+        id: null,  // will be assigned by createActivity
+        name: '',
+        description: '',
+        videoUrl: '',
+        workDuration: 30,
+        restBetweenSets: 10,
+        sets: 3,
+        _originalActivity: null,
+      };
+    }
+  } else {
+    // 'edit' mode — exercise snapshot
+    draft = { ...exercise };
+  }
+  
+  // Local state for "save to library" toggle (only in 'create' mode)
+  let saveToLibrary = isCreate;
+
+
+//-----
+      ${isCreate ? `
+        <div class="form-section-divider"></div>
+        <div class="form-group checkbox-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="ex-save-library" checked />
+            <span>Save to library for reuse in other routines</span>
+          </label>
+        </div>
+      ` : ''}
+      ${isActivityMode ? `
+        <div class="form-section-divider"></div>
+        <p class="form-hint editor-activity-note">
+          These are the default values used when adding this activity to a routine.
+          You can override them per-routine.
+        </p>
+      ` : ''}
+    </form>
+    
+    <div class="editor-actions">
+      <button type="button" class="btn btn-secondary" id="ex-cancel">Cancel</button>
+      <button type="button" class="btn btn-primary" id="ex-save">
+        ${getSaveButtonLabel(mode, isNewActivity)}
+      </button>
+    </div>
+  `;
+  
+  const modal = openModal({
+    title: getModalTitle(mode, isNewActivity),
+    content,
+  });
+  
+  wireUpEditor(content, modal, draft, mode, () => saveToLibrary, (v) => { saveToLibrary = v; }, onSave);
+}
+
+function getModalTitle(mode, isNewActivity) {
+  if (mode === 'create') return 'New Exercise';
+  if (mode === 'editActivity') return isNewActivity ? 'New Activity' : 'Edit Activity';
+  return 'Edit Exercise';
+}
+
+function getSaveButtonLabel(mode, isNewActivity) {
+  if (mode === 'create') return 'Add Exercise';
+  if (mode === 'editActivity') return isNewActivity ? 'Create Activity' : 'Save Activity';
+  return 'Save Changes';
+}
+
+// ---- 
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+    
+    try {
+      if (isActivityMode) {
+        // Activity mode — map draft back to activity fields and save
+        const activityData = {
+          name: draft.name,
+          description: draft.description,
+          videoUrl: draft.videoUrl,
+          defaultWorkDuration: draft.workDuration,
+          defaultRestBetweenSets: draft.restBetweenSets,
+          defaultSets: draft.sets,
+        };
+        
+        let savedActivity;
+        if (draft._originalActivity) {
+          // Update existing activity (preserve id, isSeeded, tags, metadata, createdAt)
+          savedActivity = await updateActivity({
+            ...draft._originalActivity,
+            ...activityData,
+          });
+        } else {
+          // Create new activity
+          savedActivity = await createActivity({
+            ...activityData,
+            isSeeded: false,
+          });
+        }
+        
+        closeModal(modal);
+        setTimeout(() => {
+          if (typeof onSave === 'function') {
+            onSave(savedActivity);
+          }
+        }, 100);
+      } else {
+        // Routine snapshot mode ('edit' or 'create')
+        // If creating new + "save to library" is checked, create library activity
+        if (isCreate && getSaveToLibrary()) {
+          const newActivity = await createActivity({
+            name: draft.name,
+            description: draft.description,
+            videoUrl: draft.videoUrl,
+            defaultWorkDuration: draft.workDuration,
+            defaultRestBetweenSets: draft.restBetweenSets,
+            defaultSets: draft.sets,
+            isSeeded: false,
+          });
+          draft.sourceActivityId = newActivity.id;
+          draft.snapshotVersion = newActivity.updatedAt;
+        }
+        
+        closeModal(modal);
+        setTimeout(() => {
+          if (typeof onSave === 'function') {
+            onSave(draft, { saveToLibrary: isCreate && getSaveToLibrary() });
+          }
+        }, 100);
+      }
+    } catch (err) {
+      console.error('Failed to save:', err);
+      alert('Failed to save: ' + err.message);
+      saveBtn.disabled = false;
+      // Restore the right label based on mode
+      if (isActivityMode) {
+        saveBtn.textContent = draft._originalActivity ? 'Save Activity' : 'Create Activity';
+      } else {
+        saveBtn.textContent = isCreate ? 'Add Exercise' : 'Save Changes';
+      }
+    }
+  });
+
+// src/components/exerciseEditor.js
+import { openModal, closeModal } from './modal.js';
+import { createActivity, updateActivity } from '../db/store.js';
+import { generateId } from '../utils/id.js';
+
+// 
