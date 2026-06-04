@@ -1,77 +1,3 @@
-// src/views/dataSection.js
-/**
- * HoldOn — Data Section (rendered inside Settings)
- * 
- * Actions:
- *   - Export all data (download JSON)
- *   - Import data (upload JSON, merge or replace)
- *   - Reset all data (wipe and reseed)
- */
-
-import { exportAllData, importData, getAllRoutines, getAllActivities, getMeta, setMeta } from '../db/store.js';
-
-export async function renderDataSection(container) {
-  // Get current counts for the export button label
-  const [routines, activities] = await Promise.all([
-    getAllRoutines(),
-    getAllActivities(),
-  ]);
-  
-  const totals = {
-    routines: routines.length,
-    activities: activities.length,
-  };
-
-  container.innerHTML = `
-    <div class="data-section">
-      <div class="data-action-row">
-        <button type="button" class="data-action-btn" id="export-btn">
-          <div class="data-action-content">
-            <div class="data-action-label">📤 Export all data</div>
-            <div class="data-action-hint">
-              Save ${totals.routines} routine${totals.routines === 1 ? '' : 's'} and ${totals.activities} ${totals.activities === 1 ? 'activity' : 'activities'} to a JSON file
-            </div>
-          </div>
-        </button>
-      </div>
-
-      <div class="settings-divider"></div>
-
-      <div class="data-action-row">
-        <button type="button" class="data-action-btn" id="import-btn">
-          <div class="data-action-content">
-            <div class="data-action-label">📥 Import data...</div>
-            <div class="data-action-hint">Restore from a backup JSON file</div>
-          </div>
-        </button>
-        <input type="file" id="import-file-input" accept="application/json,.json" hidden />
-      </div>
-
-      <div class="settings-divider"></div>
-
-      <div class="data-action-row">
-        <button type="button" class="data-action-btn data-action-btn-danger" id="reset-btn">
-          <div class="data-action-content">
-            <div class="data-action-label">🗑 Reset all data</div>
-            <div class="data-action-hint">Permanently delete everything and start fresh</div>
-          </div>
-        </button>
-      </div>
-    </div>
-  `;
-
-  wireDataSection(container);
-}
-
-function wireDataSection(container) {
-  container.querySelector('#export-btn').addEventListener('click', handleExport);
-  container.querySelector('#import-btn').addEventListener('click', () => {
-    container.querySelector('#import-file-input').click();
-  });
-  container.querySelector('#import-file-input').addEventListener('change', handleImportFile);
-  container.querySelector('#reset-btn').addEventListener('click', handleReset);
-}
-
 // ============================================================
 // EXPORT
 // ============================================================
@@ -79,28 +5,40 @@ function wireDataSection(container) {
 async function handleExport() {
   try {
     const data = await exportAllData();
-    
-    // Build filename: holdon-backup-2025-01-15.json
-    const date = new Date().toISOString().split('T')[0];  // YYYY-MM-DD
+    const date = new Date().toISOString().split('T')[0];
     const filename = `holdon-backup-${date}.json`;
-    
-    // Convert to JSON string (pretty-printed for readability)
     const jsonString = JSON.stringify(data, null, 2);
     
-    // Create blob and trigger download
-    const blob = new Blob([jsonString], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
+    // Try Web Share API first (works great on iOS Safari + Android)
+    if (canShareFiles()) {
+      const file = new File([jsonString], filename, { type: 'application/json' });
+      if (navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: 'HoldOn Backup',
+          });
+          console.log('[Data] Shared via Web Share API');
+          return;
+        } catch (shareErr) {
+          // User cancelled share, OR share failed — fall through to download
+          if (shareErr.name !== 'AbortError') {
+            console.warn('[Data] Share failed, falling back to download:', shareErr);
+          } else {
+            return;  // User cancelled, don't auto-fallback
+          }
+        }
+      }
+    }
     
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    // iOS non-Safari: download won't work, show copy/share modal
+    if (isIOSNonSafari()) {
+      showIOSExportFallback(jsonString, filename);
+      return;
+    }
     
-    // Clean up the blob URL after a short delay
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    
+    // Standard download (desktop + iOS Safari + Android)
+    triggerDownload(jsonString, filename);
     console.log('[Data] Exported:', filename);
   } catch (err) {
     console.error('[Data] Export failed:', err);
@@ -108,104 +46,138 @@ async function handleExport() {
   }
 }
 
-// ============================================================
-// IMPORT — placeholder, full impl in 1.4.F.3.B.2
-// ============================================================
-
-async function handleImportFile(e) {
-  alert('Import coming in Step 1.4.F.3.B.2!');
-  e.target.value = '';  // reset so same file can be selected again later
+function triggerDownload(jsonString, filename) {
+  const blob = new Blob([jsonString], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-// ============================================================
-// RESET — placeholder, full impl in 1.4.F.3.B.3
-// ============================================================
-
-async function handleReset() {
-  alert('Reset coming in Step 1.4.F.3.B.3!');
+function showIOSExportFallback(jsonString, filename) {
+  const content = document.createElement('div');
+  content.className = 'ios-export-fallback';
+  content.innerHTML = `
+    <p class="muted ios-export-intro">
+      Your browser doesn't support automatic downloads on iOS.
+      Use one of these options to save your backup:
+    </p>
+    
+    <div class="ios-export-option">
+      <h4>Option 1: Copy to Clipboard</h4>
+      <p class="muted">Then paste into Notes, Files, or any text editor.</p>
+      <button type="button" class="btn btn-primary" id="copy-btn">
+        📋 Copy Backup Data
+      </button>
+    </div>
+    
+    <div class="ios-export-option">
+      <h4>Option 2: Use Safari</h4>
+      <p class="muted">Open this app in Safari for full download support.</p>
+    </div>
+    
+    <div class="ios-export-option">
+      <h4>Filename suggestion</h4>
+      <p class="ios-export-filename"><code>${escapeHtml(filename)}</code></p>
+    </div>
+  `;
+  
+  const modal = openModal({
+    title: 'Export Data',
+    content,
+  });
+  
+  // Copy to clipboard handler
+  const copyBtn = content.querySelector('#copy-btn');
+  copyBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(jsonString);
+      copyBtn.textContent = '✅ Copied!';
+      copyBtn.disabled = true;
+      setTimeout(() => {
+        closeModal(modal);
+      }, 1500);
+    } catch (err) {
+      console.error('[Data] Clipboard write failed:', err);
+      // Fallback for browsers without clipboard API
+      copyBtn.textContent = '⚠️ Copy failed — see console';
+      console.log('=== HOLDON BACKUP (copy manually) ===');
+      console.log(jsonString);
+    }
+  });
 }
 
-// style.css
-/* === Step 1.4.F.3.B — Data Section === */
-
-.data-section {
-  padding: 4px 0;
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
-.data-action-row {
-  padding: 0;
-}
+// styles
+/* === iOS Export Fallback Modal === */
 
-.data-action-btn {
+.ios-export-fallback {
   display: flex;
-  align-items: center;
-  width: 100%;
-  background: none;
-  border: none;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ios-export-intro {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.ios-export-option {
+  background-color: var(--bg-elevated);
+  border-radius: var(--radius-sm);
   padding: 14px 16px;
-  font-family: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background-color 0.15s ease;
-  -webkit-tap-highlight-color: transparent;
+  border: 1px solid var(--border);
 }
 
-.data-action-btn:hover {
-  background-color: rgba(0, 0, 0, 0.03);
-}
-
-@media (prefers-color-scheme: dark) {
-  .data-action-btn:hover {
-    background-color: rgba(255, 255, 255, 0.04);
-  }
-}
-
-.data-action-btn:active {
-  background-color: rgba(0, 0, 0, 0.06);
-}
-
-@media (prefers-color-scheme: dark) {
-  .data-action-btn:active {
-    background-color: rgba(255, 255, 255, 0.08);
-  }
-}
-
-.data-action-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.data-action-label {
-  font-size: 15px;
-  font-weight: 500;
+.ios-export-option h4 {
+  margin: 0 0 4px 0;
+  font-size: 14px;
+  font-weight: 600;
   color: var(--text);
-  margin-bottom: 2px;
 }
 
-.data-action-hint {
-  font-size: 12px;
-  color: var(--text-muted);
+.ios-export-option p {
+  margin: 0 0 10px 0;
+  font-size: 13px;
   line-height: 1.4;
 }
 
-/* Danger variant for Reset */
-.data-action-btn-danger .data-action-label {
-  color: #ff3b30;
+.ios-export-option p:last-child {
+  margin-bottom: 0;
+}
+
+.ios-export-option button {
+  width: 100%;
+  justify-content: center;
+}
+
+.ios-export-filename code {
+  display: inline-block;
+  background-color: rgba(0, 0, 0, 0.06);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+  font-size: 13px;
 }
 
 @media (prefers-color-scheme: dark) {
-  .data-action-btn-danger .data-action-label {
-    color: #ff453a;
+  .ios-export-filename code {
+    background-color: rgba(255, 255, 255, 0.1);
   }
 }
-
-.data-action-btn-danger:hover {
-  background-color: rgba(255, 59, 48, 0.05);
-}
-
-@media (prefers-color-scheme: dark) {
-  .data-action-btn-danger:hover {
-    background-color: rgba(255, 69, 58, 0.08);
-  }
-}
-
