@@ -1,25 +1,939 @@
+// src/components/modal.js
+/**
+ * HoldOn — Reusable Modal Component
+ * 
+ * Usage:
+ *   import { openModal, closeModal } from '../components/modal.js';
+ *   
+ *   const modal = openModal({
+ *     title: 'My Modal',
+ *     content: '<p>Hello world</p>',  // string OR HTMLElement
+ *     onClose: () => console.log('closed'),
+ *   });
+ *   
+ *   // Later:
+ *   closeModal(modal);
+ */
+
+let modalCount = 0;
+
+/**
+ * Opens a modal overlay.
+ * @param {Object} options
+ * @param {string} options.title - Header title
+ * @param {string|HTMLElement} options.content - Body content
+ * @param {Function} [options.onClose] - Called after modal closes
+ * @param {boolean} [options.dismissable=true] - Allow backdrop click to close
+ * @returns {HTMLElement} The modal root element (for later closeModal call)
+ */
+export function openModal({ title, content, onClose, dismissable = true }) {
+  modalCount++;
+  
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.dataset.modalId = `modal-${modalCount}`;
+  
+  modal.innerHTML = `
+    <div class="modal-backdrop" data-action="backdrop"></div>
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modal-title-${modalCount}">
+      <header class="modal-header">
+        <h2 class="modal-title" id="modal-title-${modalCount}">${escapeHtml(title)}</h2>
+        <button class="modal-close-btn" data-action="close" aria-label="Close">✕</button>
+      </header>
+      <div class="modal-body"></div>
+    </div>
+  `;
+  
+  // Insert content into body
+  const bodyEl = modal.querySelector('.modal-body');
+  if (typeof content === 'string') {
+    bodyEl.innerHTML = content;
+  } else if (content instanceof HTMLElement) {
+    bodyEl.appendChild(content);
+  }
+  
+  // Wire up close handlers
+  const closeHandler = () => doClose(modal, onClose);
+  modal.querySelector('[data-action="close"]').addEventListener('click', closeHandler);
+  
+  if (dismissable) {
+    modal.querySelector('[data-action="backdrop"]').addEventListener('click', closeHandler);
+  }
+  
+  // Escape key to close
+  const escapeHandler = (e) => {
+    if (e.key === 'Escape' && dismissable) {
+      closeHandler();
+    }
+  };
+  document.addEventListener('keydown', escapeHandler);
+  modal._escapeHandler = escapeHandler;  // store for cleanup
+  
+  // Lock body scroll
+  document.body.classList.add('modal-open');
+  
+  // Append and animate in
+  document.body.appendChild(modal);
+  // Trigger CSS transition by adding 'visible' class after a frame
+  requestAnimationFrame(() => {
+    modal.classList.add('visible');
+  });
+  
+  return modal;
+}
+
+/**
+ * Closes a modal programmatically.
+ */
+export function closeModal(modal) {
+  if (modal) doClose(modal, null);
+}
+
+function doClose(modal, onClose) {
+  if (!modal || !modal.parentNode) return;
+  
+  modal.classList.remove('visible');
+  
+  // Clean up escape handler
+  if (modal._escapeHandler) {
+    document.removeEventListener('keydown', modal._escapeHandler);
+  }
+  
+  // Wait for transition, then remove
+  setTimeout(() => {
+    if (modal.parentNode) {
+      modal.parentNode.removeChild(modal);
+    }
+    
+    // Unlock body scroll if no other modals are open
+    if (!document.querySelector('.modal-overlay')) {
+      document.body.classList.remove('modal-open');
+    }
+    
+    if (typeof onClose === 'function') {
+      onClose();
+    }
+  }, 200);  // matches CSS transition duration
+}
+
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// style.css
+/* === Modal Component === */
+
+body.modal-open {
+  overflow: hidden;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  padding-top: max(16px, env(safe-area-inset-top));
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.modal-overlay.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.4);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
 @media (prefers-color-scheme: dark) {
-  .form-error {
+  .modal-backdrop {
+    background-color: rgba(0, 0, 0, 0.6);
+  }
+}
+
+.modal-panel {
+  position: relative;
+  background-color: var(--bg);
+  border-radius: var(--radius);
+  width: 100%;
+  max-width: 480px;
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.2);
+  transform: scale(0.96) translateY(8px);
+  transition: transform 0.2s ease;
+  overflow: hidden;
+}
+
+.modal-overlay.visible .modal-panel {
+  transform: scale(1) translateY(0);
+}
+
+@media (prefers-color-scheme: dark) {
+  .modal-panel {
+    background-color: var(--bg-elevated);
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+  }
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.modal-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.modal-close-btn {
+  background: none;
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.modal-close-btn:hover {
+  background-color: var(--bg-elevated);
+}
+
+@media (prefers-color-scheme: dark) {
+  .modal-close-btn:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+  }
+}
+
+.modal-body {
+  padding: 16px 20px 20px;
+  overflow-y: auto;
+  flex: 1;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Mobile: modal takes more of the screen */
+@media (max-width: 480px) {
+  .modal-overlay {
+    padding: 0;
+    align-items: flex-end;
+  }
+  
+  .modal-panel {
+    max-width: 100%;
+    max-height: 90vh;
+    max-height: 90dvh;
+    border-radius: var(--radius) var(--radius) 0 0;
+    transform: translateY(100%);
+  }
+  
+  .modal-overlay.visible .modal-panel {
+    transform: translateY(0);
+  }
+}
+
+/* === Activity Picker === */
+
+.activity-picker {
+  display: flex;
+  flex-direction: column;
+}
+
+.picker-section-label {
+  margin: 0 0 12px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.picker-item {
+  display: flex;
+  align-items: center;
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  width: 100%;
+  transition: background-color 0.15s ease, transform 0.05s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.picker-item:hover {
+  background-color: rgba(0, 122, 255, 0.05);
+  border-color: var(--accent);
+}
+
+@media (prefers-color-scheme: dark) {
+  .picker-item:hover {
+    background-color: rgba(10, 132, 255, 0.1);
+  }
+}
+
+.picker-item:active {
+  transform: scale(0.98);
+}
+
+.picker-item-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.picker-item-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
+.picker-item-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.4;
+}
+
+.picker-item-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.picker-item-chevron {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background-color: var(--accent);
+  color: white;
+  font-size: 18px;
+  font-weight: 400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 12px;
+}
+
+.picker-divider {
+  display: flex;
+  align-items: center;
+  margin: 16px 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.picker-divider::before,
+.picker-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background-color: var(--border);
+}
+
+.picker-divider span {
+  padding: 0 12px;
+}
+
+.picker-empty {
+  text-align: center;
+  padding: 32px 16px;
+  margin: 0;
+}
+
+.picker-create-new {
+  width: 100%;
+  justify-content: center;
+}
+
+/* Secondary button style */
+.btn-secondary {
+  background-color: var(--bg-elevated);
+  color: var(--accent);
+  border: 1px solid var(--border);
+}
+
+.btn-secondary:hover {
+  background-color: rgba(0, 122, 255, 0.05);
+  border-color: var(--accent);
+}
+
+@media (prefers-color-scheme: dark) {
+  .btn-secondary:hover {
+    background-color: rgba(10, 132, 255, 0.1);
+  }
+}
+
+// src/components/activityPicker.js:
+/**
+ * HoldOn — Activity Picker
+ * 
+ * Opens a modal showing all library activities. User picks one,
+ * and it gets snapshotted into the routine.
+ * 
+ * Also has a "Create New Activity" button (wired in 1.4.E.3).
+ */
+
+import { getAllActivities } from '../db/store.js';
+import { createExerciseSnapshot } from '../db/seed.js';
+import { openModal, closeModal } from './modal.js';
+
+/**
+ * Opens the activity picker modal.
+ * @param {Object} options
+ * @param {Function} options.onPick - Called with (exerciseSnapshot) when user picks an activity
+ * @param {Function} [options.onCreateNew] - Called when user taps "Create New Activity" (1.4.E.3)
+ */
+export async function openActivityPicker({ onPick, onCreateNew }) {
+  const activities = await getAllActivities();
+  
+  // Build content
+  const content = document.createElement('div');
+  content.className = 'activity-picker';
+  
+  if (activities.length === 0) {
+    content.innerHTML = `
+      <p class="muted picker-empty">No activities in your library yet.</p>
+    `;
+  } else {
+    const listHtml = activities.map((activity) => `
+      <button
+        type="button"
+        class="picker-item"
+        data-activity-id="${escapeHtml(activity.id)}"
+      >
+        <div class="picker-item-main">
+          <div class="picker-item-name">${escapeHtml(activity.name)}</div>
+          ${activity.description ? `<div class="picker-item-desc">${escapeHtml(activity.description)}</div>` : ''}
+          <div class="picker-item-meta">
+            ${activity.defaultWorkDuration}s · ${activity.defaultSets} set${activity.defaultSets === 1 ? '' : 's'}
+          </div>
+        </div>
+        <div class="picker-item-chevron">+</div>
+      </button>
+    `).join('');
+    
+    content.innerHTML = `
+      <p class="picker-section-label">Choose from your library</p>
+      <div class="picker-list">${listHtml}</div>
+    `;
+  }
+  
+  // Add "Create New" button
+  const createNewBtn = document.createElement('button');
+  createNewBtn.type = 'button';
+  createNewBtn.className = 'btn btn-secondary picker-create-new';
+  createNewBtn.innerHTML = '<span class="btn-icon">+</span><span>Create New Activity</span>';
+  
+  const divider = document.createElement('div');
+  divider.className = 'picker-divider';
+  divider.innerHTML = '<span>or</span>';
+  
+  content.appendChild(divider);
+  content.appendChild(createNewBtn);
+  
+  // Open the modal
+  const modal = openModal({
+    title: 'Add Exercise',
+    content,
+  });
+  
+  // Wire up activity item clicks
+  content.querySelectorAll('.picker-item').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.activityId;
+      const activity = activities.find((a) => a.id === id);
+      if (activity) {
+        const snapshot = createExerciseSnapshot(activity);
+        closeModal(modal);
+        if (typeof onPick === 'function') {
+          // Small delay to let modal close animation play
+          setTimeout(() => onPick(snapshot), 100);
+        }
+      }
+    });
+  });
+  
+  // Wire up "Create New" button
+  createNewBtn.addEventListener('click', () => {
+    closeModal(modal);
+    if (typeof onCreateNew === 'function') {
+      setTimeout(() => onCreateNew(), 100);
+    } else {
+      // Placeholder for 1.4.E.3
+      setTimeout(() => {
+        alert('Create New Activity coming in Step 1.4.E.3!');
+      }, 100);
+    }
+  });
+}
+
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// src/views/routineEdit.js
+/**
+ * HoldOn — Routine Edit View
+ * 
+ * Unified form for creating a new routine or editing an existing one.
+ * Step 1.4.E.2 — Exercise list + activity picker.
+ */
+
+import { getRoutine, createRoutine, updateRoutine } from '../db/store.js';
+import { router } from '../utils/router.js';
+import { openActivityPicker } from '../components/activityPicker.js';
+
+export async function renderRoutineEdit(container, routineId = null) {
+  const isEditMode = !!routineId;
+  let routine;
+  
+  if (isEditMode) {
+    routine = await getRoutine(routineId);
+    if (!routine) {
+      container.innerHTML = `
+        <main class="container">
+          <header class="screen-header">
+            <button class="btn-link" id="back-btn">← Back</button>
+            <h2>Not Found</h2>
+            <div class="header-spacer"></div>
+          </header>
+          <section class="status-card">
+            <p>This routine doesn't exist.</p>
+          </section>
+        </main>
+      `;
+      container.querySelector('#back-btn').addEventListener('click', () => router.navigate('/'));
+      return;
+    }
+  } else {
+    routine = {
+      title: '',
+      description: '',
+      restBetweenExercises: 15,
+      exercises: [],
+      useGlobalCues: true,
+      cueType: 'beep',
+      countdownAnnounce: true,
+      tags: [],
+      metadata: {},
+    };
+  }
+
+  // Local working copy — changes are only persisted on Save
+  const draft = { ...routine, exercises: [...(routine.exercises || [])] };
+
+  container.innerHTML = `
+    <main class="container">
+      <header class="screen-header">
+        <button class="btn-link" id="cancel-btn">Cancel</button>
+        <h2>${isEditMode ? 'Edit Routine' : 'New Routine'}</h2>
+        <button class="btn-link btn-link-bold" id="save-btn">Save</button>
+      </header>
+
+      <form class="routine-form" id="routine-form" autocomplete="off">
+        <div class="form-group">
+          <label for="field-title">Title</label>
+          <input
+            type="text"
+            id="field-title"
+            name="title"
+            placeholder="e.g., Lower Back Strengthening"
+            value="${escapeHtml(draft.title)}"
+            maxlength="100"
+            required
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="field-description">Description <span class="form-label-hint">(optional)</span></label>
+          <textarea
+            id="field-description"
+            name="description"
+            placeholder="e.g., A gentle routine for daily practice."
+            rows="3"
+            maxlength="500"
+          >${escapeHtml(draft.description)}</textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="field-rest">
+            Rest between exercises
+            <span class="form-label-hint">(0–120 seconds)</span>
+          </label>
+          <div class="number-input-wrapper">
+            <input
+              type="number"
+              id="field-rest"
+              name="restBetweenExercises"
+              min="0"
+              max="120"
+              step="1"
+              value="${draft.restBetweenExercises}"
+              aria-describedby="field-rest-hint"
+            />
+            <span class="number-input-suffix">sec</span>
+          </div>
+          <p class="form-hint" id="field-rest-hint">Pause time when moving from one exercise to the next.</p>
+          <p class="form-error" id="field-rest-error" hidden>Please enter a value between 0 and 120.</p>
+        </div>
+
+        <div class="form-section-divider"></div>
+
+        <div class="form-group">
+          <h3 class="section-heading">Exercises</h3>
+          <div id="exercises-container"></div>
+          <button type="button" class="btn btn-secondary add-exercise-btn" id="add-exercise-btn">
+            <span class="btn-icon">+</span>
+            <span>Add Exercise</span>
+          </button>
+        </div>
+      </form>
+    </main>
+  `;
+
+  // Wire up form handlers
+  const form = container.querySelector('#routine-form');
+  const titleInput = container.querySelector('#field-title');
+  const descInput = container.querySelector('#field-description');
+  const restInput = container.querySelector('#field-rest');
+  const saveBtn = container.querySelector('#save-btn');
+  const cancelBtn = container.querySelector('#cancel-btn');
+  const restErrorEl = container.querySelector('#field-rest-error');
+  const exercisesContainer = container.querySelector('#exercises-container');
+  const addExerciseBtn = container.querySelector('#add-exercise-btn');
+  
+  // Live-update draft as user types
+  titleInput.addEventListener('input', (e) => {
+    draft.title = e.target.value;
+  });
+  descInput.addEventListener('input', (e) => {
+    draft.description = e.target.value;
+  });
+  
+  restInput.addEventListener('input', (e) => {
+    const raw = e.target.value;
+    const value = parseInt(raw, 10);
+    const isValid = !isNaN(value) && value >= 0 && value <= 120;
+    
+    draft.restBetweenExercises = isNaN(value) ? 0 : value;
+    
+    if (raw === '' || isValid) {
+      restInput.classList.remove('input-error');
+      restErrorEl.hidden = true;
+    } else {
+      restInput.classList.add('input-error');
+      restErrorEl.hidden = false;
+    }
+  });
+  
+  restInput.addEventListener('blur', (e) => {
+    const value = parseInt(e.target.value, 10);
+    if (isNaN(value) || e.target.value === '') {
+      restInput.value = 0;
+      draft.restBetweenExercises = 0;
+      restInput.classList.remove('input-error');
+      restErrorEl.hidden = true;
+    }
+  });
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    handleSave();
+  });
+
+  cancelBtn.addEventListener('click', () => {
+    if (isEditMode) {
+      router.navigate(`/routine/${routineId}`);
+    } else {
+      router.navigate('/');
+    }
+  });
+
+  // ============================================================
+  // Exercise list rendering
+  // ============================================================
+  
+  function renderExerciseList() {
+    if (!draft.exercises || draft.exercises.length === 0) {
+      exercisesContainer.innerHTML = `
+        <div class="exercise-empty">
+          <p class="muted">No exercises yet. Tap "+ Add Exercise" below to get started.</p>
+        </div>
+      `;
+      return;
+    }
+    
+    exercisesContainer.innerHTML = draft.exercises.map((ex, i) => `
+      <article class="exercise-row" data-exercise-id="${escapeHtml(ex.id)}">
+        <div class="exercise-row-position">${i + 1}</div>
+        <div class="exercise-row-main">
+          <div class="exercise-row-name">${escapeHtml(ex.name)}</div>
+          <div class="exercise-row-meta">
+            ${ex.workDuration}s × ${ex.sets} set${ex.sets === 1 ? '' : 's'}${ex.sets > 1 && ex.restBetweenSets > 0 ? ` · ${ex.restBetweenSets}s rest` : ''}
+          </div>
+        </div>
+        <div class="exercise-row-actions">
+          <button type="button" class="btn-icon-only" data-action="edit" data-exercise-id="${escapeHtml(ex.id)}" aria-label="Edit exercise">✎</button>
+          <button type="button" class="btn-icon-only btn-icon-danger" data-action="remove" data-exercise-id="${escapeHtml(ex.id)}" aria-label="Remove exercise">✕</button>
+        </div>
+      </article>
+    `).join('');
+    
+    exercisesContainer.querySelectorAll('[data-action="remove"]').forEach((btn) => {
+      btn.addEventListener('click', () => handleRemoveExercise(btn.dataset.exerciseId));
+    });
+    exercisesContainer.querySelectorAll('[data-action="edit"]').forEach((btn) => {
+      btn.addEventListener('click', () => handleEditExercise(btn.dataset.exerciseId));
+    });
+  }
+  
+  function handleRemoveExercise(exerciseId) {
+    const exercise = draft.exercises.find((e) => e.id === exerciseId);
+    if (!exercise) return;
+    
+    const confirmed = confirm(`Remove "${exercise.name}" from this routine?`);
+    if (!confirmed) return;
+    
+    draft.exercises = draft.exercises.filter((e) => e.id !== exerciseId);
+    renderExerciseList();
+  }
+  
+  function handleEditExercise(exerciseId) {
+    // Placeholder for 1.4.E.3 — inline exercise editor
+    alert('Inline exercise editor coming in Step 1.4.E.3!\n\nFor now, you can remove and re-add the exercise to change it.');
+  }
+  
+  function handleAddExercise() {
+    openActivityPicker({
+      onPick: (snapshot) => {
+        draft.exercises.push(snapshot);
+        renderExerciseList();
+      },
+      // onCreateNew will be wired in 1.4.E.3
+    });
+  }
+  
+  addExerciseBtn.addEventListener('click', handleAddExercise);
+  
+  // Initial render of exercise list
+  renderExerciseList();
+
+  // ============================================================
+  // Save handler
+  // ============================================================
+  
+  async function handleSave() {
+    const trimmedTitle = (draft.title || '').trim();
+    if (!trimmedTitle) {
+      alert('Please enter a title for your routine.');
+      titleInput.focus();
+      return;
+    }
+    
+    const rest = draft.restBetweenExercises;
+    if (isNaN(rest) || rest < 0 || rest > 120) {
+      alert('Please enter a rest time between 0 and 120 seconds.');
+      restInput.focus();
+      restInput.select();
+      return;
+    }
+    
+    draft.title = trimmedTitle;
+    draft.description = (draft.description || '').trim();
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+
+    try {
+      let savedRoutine;
+      if (isEditMode) {
+        savedRoutine = await updateRoutine(draft);
+      } else {
+        savedRoutine = await createRoutine(draft);
+      }
+      router.navigate(`/routine/${savedRoutine.id}`);
+    } catch (err) {
+      console.error('Failed to save routine:', err);
+      alert('Failed to save: ' + err.message);
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save';
+    }
+  }
+
+  saveBtn.addEventListener('click', handleSave);
+
+  if (!isEditMode) {
+    setTimeout(() => titleInput.focus(), 50);
+  }
+}
+
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// Style.css
+/* === Exercise Rows (within edit form) === */
+
+.exercise-empty {
+  background-color: var(--bg-elevated);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 24px 16px;
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+.exercise-empty p {
+  margin: 0;
+}
+
+.exercise-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background-color: var(--bg-elevated);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  box-shadow: var(--shadow);
+}
+
+.exercise-row-position {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background-color: var(--accent);
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.exercise-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.exercise-row-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
+.exercise-row-meta {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.exercise-row-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.btn-icon-only {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: 50%;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn-icon-only:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+  color: var(--text);
+}
+
+@media (prefers-color-scheme: dark) {
+  .btn-icon-only:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+  }
+}
+
+.btn-icon-danger:hover {
+  background-color: rgba(255, 59, 48, 0.1);
+  color: #ff3b30;
+}
+
+@media (prefers-color-scheme: dark) {
+  .btn-icon-danger:hover {
+    background-color: rgba(255, 69, 58, 0.15);
     color: #ff453a;
   }
 }
 
-.form-group input.input-error,
-.form-group textarea.input-error {
-  border-color: #ff3b30;
-  box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.12);
+.add-exercise-btn {
+  width: 100%;
+  justify-content: center;
+  margin-top: 8px;
 }
 
-@media (prefers-color-scheme: dark) {
-  .form-group input.input-error,
-  .form-group textarea.input-error {
-    border-color: #ff453a;
-    box-shadow: 0 0 0 3px rgba(255, 69, 58, 0.18);
-  }
-}
-
-.form-group input.input-error:focus,
-.form-group textarea.input-error:focus {
-  border-color: #ff3b30;
-  box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.2);
-}
