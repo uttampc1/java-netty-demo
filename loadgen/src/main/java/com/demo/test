@@ -1,166 +1,527 @@
-// src/views/settingsLibrary.js
+// src/db/cueDefaults.js
 /**
- * HoldOn — Settings → Activity Library (dedicated screen)
+ * HoldOn — Cue Defaults
  * 
- * Full-screen view for managing the activity library.
- * Reuses renderLibrarySection() from views/librarySection.js.
+ * Loads/saves the global default cue settings from the meta store.
+ * Phase 2 will read these when playing audio/haptics during sessions.
  */
 
-import { router } from '../utils/router.js';
-import { renderLibrarySection } from './librarySection.js';
+import { getMeta, setMeta } from './store.js';
 
-export async function renderSettingsLibrary(container) {
-  container.innerHTML = `
-    <main class="container">
-      <header class="screen-header">
-        <button class="btn-link" id="back-btn">← Settings</button>
-        <h2>Activity Library</h2>
-        <div class="header-spacer"></div>
-      </header>
+const META_KEY = 'cueDefaults';
 
-      <section class="settings-section">
-        <div class="settings-card" id="library-card"></div>
-      </section>
-    </main>
-  `;
+export const DEFAULT_CUE_SETTINGS = {
+  cueType: 'beep',
+  countdownAnnounce: true,
+  volume: 70,
+};
 
-  container.querySelector('#back-btn').addEventListener('click', () => {
-    router.navigate('/settings');
-  });
+export const CUE_TYPE_OPTIONS = [
+  { value: 'beep',             label: 'Beep',                description: 'Short audio tone' },
+  { value: 'voice',            label: 'Voice',               description: 'Spoken announcements' },
+  { value: 'vibration',        label: 'Vibration',           description: 'Haptic only (mobile)' },
+  { value: 'beep-vibration',   label: 'Beep + Vibration',    description: 'Audio + haptic' },
+  { value: 'voice-vibration',  label: 'Voice + Vibration',   description: 'Spoken + haptic' },
+];
 
-  const libraryCard = container.querySelector('#library-card');
-  await renderLibrarySection(libraryCard);
+/**
+ * Get the current cue defaults (merges saved values with built-in defaults).
+ */
+export async function getCueDefaults() {
+  const saved = await getMeta(META_KEY);
+  return { ...DEFAULT_CUE_SETTINGS, ...(saved || {}) };
 }
 
-// src/views/settings.js - entire content
 /**
- * HoldOn — Settings View
+ * Save cue defaults (full replacement of the meta entry).
+ */
+export async function saveCueDefaults(settings) {
+  const merged = { ...DEFAULT_CUE_SETTINGS, ...settings };
+  await setMeta(META_KEY, merged);
+  return merged;
+}
+
+/**
+ * Update a single cue default field.
+ */
+export async function updateCueDefault(field, value) {
+  const current = await getCueDefaults();
+  current[field] = value;
+  return saveCueDefaults(current);
+}
+
+// src/utils/beep.js
+/**
+ * HoldOn — Tiny beep helper (for Test Cue button)
  * 
- * Top-level settings screen accessed from home (gear icon).
- * Sections:
- *   - Activity Library (navigation row → dedicated screen)
- *   - Cue Defaults                                          ⏳ 1.4.F.3.A
- *   - Data (export/import/reset)                            ⏳ 1.4.F.3.B
- *   - About                                                 ⏳ 1.4.F.3.C
+ * Uses Web Audio API to play a short tone. No external dependencies.
+ * Phase 2 will expand on this with a proper cue engine.
  */
 
-import { router } from '../utils/router.js';
-import { getAllActivities } from '../db/store.js';
+let audioCtx = null;
 
-export async function renderSettings(container) {
-  const activities = await getAllActivities();
-  const activityCount = activities.length;
+function getAudioContext() {
+  if (!audioCtx) {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    audioCtx = new Ctx();
+  }
+  // Some browsers suspend the context until user interaction
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+  return audioCtx;
+}
+
+/**
+ * Plays a short beep tone.
+ * @param {Object} options
+ * @param {number} [options.frequency=880] - Hz (A5 = 880)
+ * @param {number} [options.duration=0.15] - seconds
+ * @param {number} [options.volume=0.7]    - 0.0 to 1.0
+ */
+export function playBeep({ frequency = 880, duration = 0.15, volume = 0.7 } = {}) {
+  const ctx = getAudioContext();
+  if (!ctx) {
+    console.warn('[Beep] Web Audio API not supported');
+    return;
+  }
+
+  const oscillator = ctx.createOscillator();
+  const gainNode = ctx.createGain();
+
+  oscillator.type = 'sine';
+  oscillator.frequency.value = frequency;
+
+  // Envelope: quick attack, smooth decay (avoids harsh clicks)
+  const now = ctx.currentTime;
+  gainNode.gain.setValueAtTime(0, now);
+  gainNode.gain.linearRampToValueAtTime(volume, now + 0.01);
+  gainNode.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+  oscillator.connect(gainNode);
+  gainNode.connect(ctx.destination);
+
+  oscillator.start(now);
+  oscillator.stop(now + duration);
+}
+
+/**
+ * Triggers a short vibration (mobile only). Silently no-ops if unsupported.
+ * @param {number|number[]} pattern - milliseconds, or pattern array
+ */
+export function vibrate(pattern = 60) {
+  if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+    navigator.vibrate(pattern);
+  }
+}
+
+// src/views/cueDefaultsSection.js
+/**
+ * HoldOn — Cue Defaults Section (rendered inside Settings)
+ * 
+ * Auto-saves on change (no explicit Save button).
+ * Includes a "Test cue" button that previews the current settings.
+ */
+
+import {
+  getCueDefaults,
+  updateCueDefault,
+  CUE_TYPE_OPTIONS,
+} from '../db/cueDefaults.js';
+import { playBeep, vibrate } from '../utils/beep.js';
+
+export async function renderCueDefaultsSection(container) {
+  const settings = await getCueDefaults();
+
+  const cueTypeOptionsHtml = CUE_TYPE_OPTIONS.map((opt) => `
+    <label class="radio-row">
+      <input
+        type="radio"
+        name="cue-type"
+        value="${escapeHtml(opt.value)}"
+        ${settings.cueType === opt.value ? 'checked' : ''}
+      />
+      <div class="radio-row-content">
+        <div class="radio-row-label">${escapeHtml(opt.label)}</div>
+        <div class="radio-row-description">${escapeHtml(opt.description)}</div>
+      </div>
+    </label>
+  `).join('');
 
   container.innerHTML = `
-    <main class="container">
-      <header class="screen-header">
-        <button class="btn-link" id="back-btn">← Back</button>
-        <h2>Settings</h2>
-        <div class="header-spacer"></div>
-      </header>
-
-      <section class="settings-section">
-        <h3 class="settings-section-title">Activity Library</h3>
-        <div class="settings-card">
-          <button type="button" class="settings-nav-row" id="library-nav">
-            <span class="settings-nav-label">Activity Library</span>
-            <span class="settings-nav-meta">
-              <span class="settings-nav-count">${activityCount}</span>
-              <span class="settings-nav-chevron">›</span>
-            </span>
-          </button>
+    <div class="cue-defaults">
+      <div class="cue-field">
+        <div class="cue-field-label">Default cue type</div>
+        <div class="radio-group" id="cue-type-group">
+          ${cueTypeOptionsHtml}
         </div>
-      </section>
+      </div>
 
-      <section class="settings-section">
-        <h3 class="settings-section-title">Cue Defaults</h3>
-        <div class="settings-card">
-          <p class="muted settings-placeholder">Cue settings coming in Step 1.4.F.3.A.</p>
-        </div>
-      </section>
+      <div class="settings-divider"></div>
 
-      <section class="settings-section">
-        <h3 class="settings-section-title">Data</h3>
-        <div class="settings-card">
-          <p class="muted settings-placeholder">Export / import coming in Step 1.4.F.3.B.</p>
+      <div class="cue-field cue-field-row">
+        <div class="cue-field-text">
+          <div class="cue-field-label">Countdown announce</div>
+          <div class="cue-field-hint">Play "3, 2, 1" before each phase ends.</div>
         </div>
-      </section>
+        <label class="toggle-switch">
+          <input
+            type="checkbox"
+            id="countdown-toggle"
+            ${settings.countdownAnnounce ? 'checked' : ''}
+          />
+          <span class="toggle-track"></span>
+        </label>
+      </div>
 
-      <section class="settings-section">
-        <h3 class="settings-section-title">About</h3>
-        <div class="settings-card">
-          <p class="muted settings-placeholder">About info coming in Step 1.4.F.3.C.</p>
+      <div class="settings-divider"></div>
+
+      <div class="cue-field">
+        <div class="cue-field-label-row">
+          <div class="cue-field-label">Volume</div>
+          <div class="cue-field-value" id="volume-value">${settings.volume}%</div>
         </div>
-      </section>
-    </main>
+        <input
+          type="range"
+          id="volume-slider"
+          min="0"
+          max="100"
+          step="5"
+          value="${settings.volume}"
+          class="volume-slider"
+        />
+        <div class="cue-field-hint">Applies to beep and voice cues.</div>
+      </div>
+
+      <div class="settings-divider"></div>
+
+      <div class="cue-test-row">
+        <button type="button" class="btn btn-secondary cue-test-btn" id="cue-test-btn">
+          <span>🔊 Test cue</span>
+        </button>
+      </div>
+    </div>
   `;
 
-  container.querySelector('#back-btn').addEventListener('click', () => router.navigate('/'));
-  container.querySelector('#library-nav').addEventListener('click', () => {
-    router.navigate('/settings/library');
+  wireCueDefaults(container, settings);
+}
+
+function wireCueDefaults(container, settings) {
+  // Cue type radios
+  container.querySelectorAll('input[name="cue-type"]').forEach((radio) => {
+    radio.addEventListener('change', async (e) => {
+      if (e.target.checked) {
+        settings.cueType = e.target.value;
+        await updateCueDefault('cueType', e.target.value);
+      }
+    });
+  });
+
+  // Countdown announce toggle
+  const countdownToggle = container.querySelector('#countdown-toggle');
+  countdownToggle.addEventListener('change', async (e) => {
+    settings.countdownAnnounce = e.target.checked;
+    await updateCueDefault('countdownAnnounce', e.target.checked);
+  });
+
+  // Volume slider
+  const volumeSlider = container.querySelector('#volume-slider');
+  const volumeValue = container.querySelector('#volume-value');
+  volumeSlider.addEventListener('input', (e) => {
+    // Live update display
+    const value = parseInt(e.target.value, 10);
+    settings.volume = value;
+    volumeValue.textContent = `${value}%`;
+  });
+  // Save only on release (avoids hammering IndexedDB during slider drag)
+  volumeSlider.addEventListener('change', async (e) => {
+    const value = parseInt(e.target.value, 10);
+    await updateCueDefault('volume', value);
+  });
+
+  // Test cue button
+  const testBtn = container.querySelector('#cue-test-btn');
+  testBtn.addEventListener('click', () => {
+    testCue(settings);
   });
 }
 
-/* === Settings Navigation Row (iOS-style) === */
+/**
+ * Plays a preview of the current cue settings.
+ */
+function testCue(settings) {
+  const volumeNormalized = (settings.volume || 70) / 100;
+  const cueType = settings.cueType || 'beep';
 
-.settings-nav-row {
+  const playsBeep = cueType === 'beep' || cueType === 'beep-vibration';
+  const playsVibration = cueType === 'vibration'
+    || cueType === 'beep-vibration'
+    || cueType === 'voice-vibration';
+  const playsVoice = cueType === 'voice' || cueType === 'voice-vibration';
+
+  if (playsBeep) {
+    playBeep({ volume: volumeNormalized });
+  }
+
+  if (playsVoice) {
+    // Phase 2 will use SpeechSynthesis properly. For now, a quick demo.
+    if ('speechSynthesis' in window) {
+      try {
+        const utterance = new SpeechSynthesisUtterance('Go!');
+        utterance.volume = volumeNormalized;
+        utterance.rate = 1.1;
+        window.speechSynthesis.speak(utterance);
+      } catch (err) {
+        console.warn('[Cue Test] Speech synthesis failed:', err);
+      }
+    }
+  }
+
+  if (playsVibration) {
+    vibrate(80);
+  }
+}
+
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// Styles
+/* === Step 1.4.F.3.A — Cue Defaults === */
+
+.cue-defaults {
+  padding: 4px 0;
+}
+
+.cue-field {
+  padding: 14px 16px;
+}
+
+.cue-field-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  width: 100%;
-  background: none;
-  border: none;
-  padding: 14px 16px;
-  font-family: inherit;
-  font-size: 16px;
+  gap: 12px;
+}
+
+.cue-field-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.cue-field-label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.cue-field-label {
+  font-size: 15px;
+  font-weight: 500;
   color: var(--text);
+  margin-bottom: 4px;
+}
+
+.cue-field-row .cue-field-label {
+  margin-bottom: 2px;
+}
+
+.cue-field-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin-top: 4px;
+}
+
+.cue-field-value {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Settings divider (between cue fields) */
+.settings-divider {
+  height: 1px;
+  background-color: var(--border);
+  margin: 0 16px;
+}
+
+/* Radio group */
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.radio-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  text-align: left;
   transition: background-color 0.15s ease;
   -webkit-tap-highlight-color: transparent;
 }
 
-.settings-nav-row:hover {
+.radio-row:hover {
   background-color: rgba(0, 0, 0, 0.03);
 }
 
 @media (prefers-color-scheme: dark) {
-  .settings-nav-row:hover {
+  .radio-row:hover {
     background-color: rgba(255, 255, 255, 0.04);
   }
 }
 
-.settings-nav-row:active {
-  background-color: rgba(0, 0, 0, 0.06);
+.radio-row input[type="radio"] {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  margin-top: 2px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.radio-row-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.radio-row-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1.3;
+}
+
+.radio-row-description {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+/* Toggle switch (iOS-style) */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  width: 51px;
+  height: 31px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.toggle-switch input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-track {
+  position: absolute;
+  inset: 0;
+  background-color: #d1d1d6;
+  border-radius: 31px;
+  transition: background-color 0.2s ease;
 }
 
 @media (prefers-color-scheme: dark) {
-  .settings-nav-row:active {
-    background-color: rgba(255, 255, 255, 0.08);
+  .toggle-track {
+    background-color: #3a3a3c;
   }
 }
 
-.settings-nav-label {
-  font-weight: 500;
-  color: var(--text);
+.toggle-track::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 27px;
+  height: 27px;
+  background-color: white;
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+  transition: transform 0.2s ease;
 }
 
-.settings-nav-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-muted);
+.toggle-switch input[type="checkbox"]:checked + .toggle-track {
+  background-color: #34c759;
 }
 
-.settings-nav-count {
-  font-size: 15px;
-  font-weight: 400;
-  color: var(--text-muted);
+@media (prefers-color-scheme: dark) {
+  .toggle-switch input[type="checkbox"]:checked + .toggle-track {
+    background-color: #30d158;
+  }
 }
 
-.settings-nav-chevron {
-  font-size: 20px;
-  font-weight: 300;
-  color: var(--text-muted);
-  line-height: 1;
+.toggle-switch input[type="checkbox"]:checked + .toggle-track::before {
+  transform: translateX(20px);
 }
+
+/* Volume slider */
+.volume-slider {
+  width: 100%;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: linear-gradient(to right, var(--accent) 0%, var(--accent) var(--volume-fill, 70%), var(--border) var(--volume-fill, 70%), var(--border) 100%);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+  margin: 6px 0 2px 0;
+}
+
+.volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  background-color: white;
+  border-radius: 50%;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  border: none;
+}
+
+.volume-slider::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  background-color: white;
+  border-radius: 50%;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  border: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .volume-slider::-webkit-slider-thumb {
+    background-color: #f5f5f7;
+  }
+  .volume-slider::-moz-range-thumb {
+    background-color: #f5f5f7;
+  }
+}
+
+/* Test cue button row */
+.cue-test-row {
+  padding: 14px 16px;
+}
+
+.cue-test-btn {
+  width: 100%;
+  justify-content: center;
+}
+
