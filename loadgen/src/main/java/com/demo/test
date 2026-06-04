@@ -1,228 +1,203 @@
-// src/utils/video.js
+// src/views/routineEdit.js
 /**
- * HoldOn — Video URL helpers
+ * HoldOn — Routine Edit View
  * 
- * Detects YouTube and Vimeo URLs and extracts video IDs for embedding.
- * Returns null for unsupported or invalid URLs (we'll just show a generic link).
- */
-
-/**
- * Parses a video URL and returns metadata.
- * @param {string} url
- * @returns {{ provider: 'youtube'|'vimeo'|'other', id: string|null, embedUrl: string|null, originalUrl: string } | null}
- */
-export function parseVideoUrl(url) {
-  if (!url || typeof url !== 'string') return null;
-  const trimmed = url.trim();
-  if (!trimmed) return null;
-
-  // YouTube patterns:
-  //   https://www.youtube.com/watch?v=VIDEO_ID
-  //   https://youtube.com/watch?v=VIDEO_ID
-  //   https://youtu.be/VIDEO_ID
-  //   https://www.youtube.com/embed/VIDEO_ID
-  //   https://www.youtube.com/shorts/VIDEO_ID
-  const ytMatch = trimmed.match(
-    /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/
-  );
-  if (ytMatch) {
-    const id = ytMatch[1];
-    return {
-      provider: 'youtube',
-      id,
-      embedUrl: `https://www.youtube.com/embed/${id}`,
-      originalUrl: trimmed,
-    };
-  }
-
-  // Vimeo patterns:
-  //   https://vimeo.com/123456789
-  //   https://player.vimeo.com/video/123456789
-  const vimeoMatch = trimmed.match(/vimeo\.com\/(?:video\/)?(\d+)/);
-  if (vimeoMatch) {
-    const id = vimeoMatch[1];
-    return {
-      provider: 'vimeo',
-      id,
-      embedUrl: `https://player.vimeo.com/video/${id}`,
-      originalUrl: trimmed,
-    };
-  }
-
-  // Fallback: treat as a generic URL (we'll just link to it, not embed)
-  if (/^https?:\/\//.test(trimmed)) {
-    return {
-      provider: 'other',
-      id: null,
-      embedUrl: null,
-      originalUrl: trimmed,
-    };
-  }
-
-  return null;
-}
-
-/**
- * Returns true if the URL is an embeddable video (YouTube/Vimeo).
- */
-export function isEmbeddableVideo(url) {
-  const parsed = parseVideoUrl(url);
-  return parsed !== null && parsed.embedUrl !== null;
-}
-
-
-// src/views/routineDetail.js
-/**
- * HoldOn — Routine Detail View
+ * Unified form for creating a new routine or editing an existing one.
+ * Route patterns:
+ *   #/new          → create mode (no routineId)
+ *   #/edit/:id     → edit mode (routineId provided)
  * 
- * Shows a routine's info, all exercises, and a big Start button.
- * Edit and Delete actions in the header.
+ * Step 1.4.E.1 — Skeleton only (no exercise editor yet).
  */
 
-import { getRoutine, deleteRoutine } from '../db/store.js';
-import { calculateRoutineDuration, countTotalSets } from '../core/totals.js';
-import { formatDuration } from '../utils/format.js';
-import { parseVideoUrl } from '../utils/video.js';
+import { getRoutine, createRoutine, updateRoutine } from '../db/store.js';
 import { router } from '../utils/router.js';
 
 /**
- * Renders the routine detail view.
+ * Renders the create/edit form.
  * @param {HTMLElement} container
- * @param {string} routineId
+ * @param {string|null} routineId - null for create mode
  */
-export async function renderRoutineDetail(container, routineId) {
-  const routine = await getRoutine(routineId);
-
-  if (!routine) {
-    container.innerHTML = `
-      <main class="container">
-        <header class="screen-header">
-          <button class="btn-link" id="back-btn">← Back</button>
-          <h2>Not Found</h2>
-          <div class="header-spacer"></div>
-        </header>
-        <section class="status-card">
-          <p>This routine doesn't exist. It may have been deleted.</p>
-        </section>
-      </main>
-    `;
-    container.querySelector('#back-btn').addEventListener('click', () => router.navigate('/'));
-    return;
+export async function renderRoutineEdit(container, routineId = null) {
+  const isEditMode = !!routineId;
+  let routine;
+  
+  if (isEditMode) {
+    routine = await getRoutine(routineId);
+    if (!routine) {
+      container.innerHTML = `
+        <main class="container">
+          <header class="screen-header">
+            <button class="btn-link" id="back-btn">← Back</button>
+            <h2>Not Found</h2>
+            <div class="header-spacer"></div>
+          </header>
+          <section class="status-card">
+            <p>This routine doesn't exist.</p>
+          </section>
+        </main>
+      `;
+      container.querySelector('#back-btn').addEventListener('click', () => router.navigate('/'));
+      return;
+    }
+  } else {
+    // Create mode — start with a blank routine in memory (not saved yet)
+    routine = {
+      title: '',
+      description: '',
+      restBetweenExercises: 15,
+      exercises: [],
+      useGlobalCues: true,
+      cueType: 'beep',
+      countdownAnnounce: true,
+      tags: [],
+      metadata: {},
+    };
   }
 
-  const duration = calculateRoutineDuration(routine);
-  const totalSets = countTotalSets(routine);
-  const exerciseCount = routine.exercises?.length || 0;
+  // Local working copy — changes are only persisted on Save
+  const draft = { ...routine };
 
   container.innerHTML = `
     <main class="container">
       <header class="screen-header">
-        <button class="btn-link" id="back-btn">← Back</button>
-        <h2>${escapeHtml(routine.title)}</h2>
-        <button class="btn-link" id="edit-btn">Edit</button>
+        <button class="btn-link" id="cancel-btn">Cancel</button>
+        <h2>${isEditMode ? 'Edit Routine' : 'New Routine'}</h2>
+        <button class="btn-link btn-link-bold" id="save-btn">Save</button>
       </header>
 
-      ${routine.description ? `<p class="routine-detail-desc">${escapeHtml(routine.description)}</p>` : ''}
-
-      <section class="summary-card">
-        <div class="summary-stat">
-          <div class="summary-stat-value">${exerciseCount}</div>
-          <div class="summary-stat-label">exercise${exerciseCount === 1 ? '' : 's'}</div>
+      <form class="routine-form" id="routine-form" autocomplete="off">
+        <div class="form-group">
+          <label for="field-title">Title</label>
+          <input
+            type="text"
+            id="field-title"
+            name="title"
+            placeholder="e.g., Lower Back Strengthening"
+            value="${escapeHtml(draft.title)}"
+            maxlength="100"
+            required
+          />
         </div>
-        <div class="summary-stat-divider"></div>
-        <div class="summary-stat">
-          <div class="summary-stat-value">${totalSets}</div>
-          <div class="summary-stat-label">total set${totalSets === 1 ? '' : 's'}</div>
+
+        <div class="form-group">
+          <label for="field-description">Description <span class="form-label-hint">(optional)</span></label>
+          <textarea
+            id="field-description"
+            name="description"
+            placeholder="e.g., A gentle routine for daily practice."
+            rows="3"
+            maxlength="500"
+          >${escapeHtml(draft.description)}</textarea>
         </div>
-        <div class="summary-stat-divider"></div>
-        <div class="summary-stat">
-          <div class="summary-stat-value">~${formatDuration(duration)}</div>
-          <div class="summary-stat-label">duration</div>
+
+        <div class="form-group">
+          <label for="field-rest">
+            Rest between exercises
+            <span class="form-label-hint">(seconds)</span>
+          </label>
+          <div class="number-input-wrapper">
+            <input
+              type="number"
+              id="field-rest"
+              name="restBetweenExercises"
+              min="0"
+              max="120"
+              step="1"
+              value="${draft.restBetweenExercises}"
+            />
+            <span class="number-input-suffix">sec</span>
+          </div>
+          <p class="form-hint">Pause time when moving from one exercise to the next.</p>
         </div>
-      </section>
 
-      ${exerciseCount === 0 ? renderEmptyExercises() : renderExerciseList(routine.exercises)}
+        <div class="form-section-divider"></div>
 
-      <div class="primary-action">
-        <button class="btn btn-primary btn-large" id="start-btn" ${exerciseCount === 0 ? 'disabled' : ''}>
-          ▶ Start Session
-        </button>
-      </div>
-
-      <div class="danger-action">
-        <button class="btn btn-danger" id="delete-btn">Delete Routine</button>
-      </div>
+        <div class="form-group">
+          <h3 class="section-heading">Exercises</h3>
+          <div class="placeholder-card">
+            <p class="muted">Exercise editor coming in the next step (1.4.E.2).</p>
+            <p class="muted" style="font-size: 13px;">Currently this routine has <strong>${draft.exercises.length}</strong> exercise${draft.exercises.length === 1 ? '' : 's'}.</p>
+          </div>
+        </div>
+      </form>
     </main>
   `;
 
-  // Wire up handlers
-  container.querySelector('#back-btn').addEventListener('click', () => router.navigate('/'));
-  container.querySelector('#edit-btn').addEventListener('click', () => {
-    router.navigate(`/edit/${routine.id}`);
+  // Wire up form handlers
+  const form = container.querySelector('#routine-form');
+  const titleInput = container.querySelector('#field-title');
+  const descInput = container.querySelector('#field-description');
+  const restInput = container.querySelector('#field-rest');
+  const saveBtn = container.querySelector('#save-btn');
+  const cancelBtn = container.querySelector('#cancel-btn');
+
+  // Live-update draft as user types (no DB writes yet)
+  titleInput.addEventListener('input', (e) => {
+    draft.title = e.target.value;
+  });
+  descInput.addEventListener('input', (e) => {
+    draft.description = e.target.value;
+  });
+  restInput.addEventListener('input', (e) => {
+    const value = parseInt(e.target.value, 10);
+    draft.restBetweenExercises = isNaN(value) ? 0 : Math.max(0, Math.min(120, value));
   });
 
-  container.querySelector('#start-btn').addEventListener('click', () => {
-    if (exerciseCount === 0) return;
-    alert('Session player coming in Phase 2!\n\nFor now, this is just the routine detail preview.');
+  // Prevent form submission via Enter key (we have our own Save button)
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    handleSave();
   });
 
-  container.querySelector('#delete-btn').addEventListener('click', async () => {
-    const confirmed = confirm(
-      `Delete "${routine.title}"?\n\nThis cannot be undone.`
-    );
-    if (!confirmed) return;
-    
-    try {
-      await deleteRoutine(routine.id);
+  // Cancel — just navigate back (no unsaved changes protection in v1)
+  cancelBtn.addEventListener('click', () => {
+    if (isEditMode) {
+      router.navigate(`/routine/${routineId}`);
+    } else {
       router.navigate('/');
-    } catch (err) {
-      alert('Failed to delete: ' + err.message);
     }
   });
-}
 
-function renderEmptyExercises() {
-  return `
-    <section class="empty-state">
-      <div class="empty-icon">📋</div>
-      <h3>No exercises yet</h3>
-      <p class="muted">Tap "Edit" above to add exercises to this routine.</p>
-    </section>
-  `;
-}
+  // Save handler
+  async function handleSave() {
+    // Validation: title is required
+    const trimmedTitle = (draft.title || '').trim();
+    if (!trimmedTitle) {
+      alert('Please enter a title for your routine.');
+      titleInput.focus();
+      return;
+    }
+    draft.title = trimmedTitle;
+    draft.description = (draft.description || '').trim();
 
-function renderExerciseList(exercises) {
-  return `
-    <section class="exercise-detail-list">
-      <h3 class="section-heading">Exercises</h3>
-      ${exercises.map((ex, i) => renderExerciseItem(ex, i + 1)).join('')}
-    </section>
-  `;
-}
+    // Disable button to prevent double-click
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
 
-function renderExerciseItem(exercise, position) {
-  const video = parseVideoUrl(exercise.videoUrl);
-  const videoLink = video
-    ? `<a href="${escapeHtml(video.originalUrl)}" target="_blank" rel="noopener noreferrer" class="video-link">▶ Watch demonstration</a>`
-    : '';
+    try {
+      let savedRoutine;
+      if (isEditMode) {
+        savedRoutine = await updateRoutine(draft);
+        router.navigate(`/routine/${savedRoutine.id}`);
+      } else {
+        savedRoutine = await createRoutine(draft);
+        router.navigate(`/routine/${savedRoutine.id}`);
+      }
+    } catch (err) {
+      console.error('Failed to save routine:', err);
+      alert('Failed to save: ' + err.message);
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save';
+    }
+  }
 
-  const restNote = exercise.sets > 1 && exercise.restBetweenSets > 0
-    ? ` · ${exercise.restBetweenSets}s rest`
-    : '';
+  saveBtn.addEventListener('click', handleSave);
 
-  return `
-    <article class="exercise-detail-item">
-      <div class="exercise-position">${position}</div>
-      <div class="exercise-detail-main">
-        <h4 class="exercise-detail-name">${escapeHtml(exercise.name)}</h4>
-        ${exercise.description ? `<p class="exercise-detail-desc">${escapeHtml(exercise.description)}</p>` : ''}
-        <p class="exercise-detail-meta">
-          ${exercise.workDuration}s hold × ${exercise.sets} set${exercise.sets === 1 ? '' : 's'}${restNote}
-        </p>
-        ${videoLink}
-      </div>
-    </article>
-  `;
+  // Auto-focus title field in create mode
+  if (!isEditMode) {
+    setTimeout(() => titleInput.focus(), 50);
+  }
 }
 
 function escapeHtml(str) {
@@ -236,183 +211,137 @@ function escapeHtml(str) {
 }
 
 // style.css
-.routine-detail-desc {
-  color: var(--text-muted);
+/* === Step 1.4.E.1 — Routine Form === */
+
+/* Form layout */
+.routine-form {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
   font-size: 15px;
-  margin: 0 0 20px 0;
-  line-height: 1.5;
-}
-
-/* Summary Card (stats row) */
-.summary-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-around;
-  background-color: var(--bg-elevated);
-  border-radius: var(--radius);
-  padding: 18px 12px;
-  margin-bottom: 24px;
-  box-shadow: var(--shadow);
-}
-
-.summary-stat {
-  text-align: center;
-  flex: 1;
-}
-
-.summary-stat-value {
-  font-size: 22px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  margin-bottom: 2px;
-}
-
-.summary-stat-label {
-  font-size: 12px;
-  color: var(--text-muted);
-  text-transform: lowercase;
-}
-
-.summary-stat-divider {
-  width: 1px;
-  height: 32px;
-  background-color: var(--border);
-}
-
-/* Section Heading */
-.section-heading {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin: 24px 0 12px 0;
-  padding: 0 4px;
-}
-
-/* Exercise List */
-.exercise-detail-list {
-  margin-bottom: 32px;
-}
-
-.exercise-detail-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-  background-color: var(--bg-elevated);
-  border-radius: var(--radius);
-  padding: 16px;
-  margin-bottom: 10px;
-  box-shadow: var(--shadow);
-}
-
-.exercise-position {
-  flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background-color: var(--accent);
-  color: white;
-  font-size: 14px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.exercise-detail-main {
-  flex: 1;
-  min-width: 0;
-}
-
-.exercise-detail-name {
-  margin: 0 0 4px 0;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.exercise-detail-desc {
-  margin: 0 0 8px 0;
-  font-size: 14px;
-  color: var(--text-muted);
-  line-height: 1.4;
-}
-
-.exercise-detail-meta {
-  margin: 4px 0;
-  font-size: 13px;
   font-weight: 500;
+  margin-bottom: 8px;
   color: var(--text);
 }
 
-.video-link {
-  display: inline-block;
-  margin-top: 6px;
-  color: var(--accent);
-  font-size: 13px;
-  font-weight: 500;
-  text-decoration: none;
-}
-
-.video-link:hover {
-  text-decoration: underline;
-}
-
-/* Primary & Danger Actions */
-.primary-action {
-  margin: 32px 0 16px 0;
-}
-
-.btn-large {
-  width: 100%;
-  padding: 16px 24px;
-  font-size: 17px;
-  font-weight: 600;
-  border-radius: var(--radius);
-}
-
-.btn-large:disabled {
-  background-color: var(--text-muted);
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.danger-action {
-  margin-top: 8px;
-  display: flex;
-  justify-content: center;
-}
-
-.btn-danger {
-  background: none;
-  color: #ff3b30;
-  padding: 12px 20px;
-  font-size: 15px;
+.form-label-hint {
   font-weight: 400;
+  color: var(--text-muted);
+  font-size: 13px;
 }
 
-.btn-danger:hover {
-  background-color: rgba(255, 59, 48, 0.08);
+.form-hint {
+  margin: 6px 0 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
 }
 
-.btn-danger:active {
-  background-color: rgba(255, 59, 48, 0.15);
+/* Inputs and textareas */
+.form-group input[type="text"],
+.form-group input[type="number"],
+.form-group textarea {
+  width: 100%;
+  padding: 12px 14px;
+  font-family: inherit;
+  font-size: 16px;          /* 16px prevents iOS zoom on focus */
+  color: var(--text);
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.form-group textarea {
+  resize: vertical;
+  min-height: 72px;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+.form-group input:focus,
+.form-group textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
 }
 
 @media (prefers-color-scheme: dark) {
-  .btn-danger {
-    color: #ff453a;
-  }
-  .btn-danger:hover {
-    background-color: rgba(255, 69, 58, 0.12);
+  .form-group input:focus,
+  .form-group textarea:focus {
+    box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.25);
   }
 }
 
-// main.js
-import { renderRoutineList } from './views/routineList.js';
-import { renderRoutineDetail } from './views/routineDetail.js';
+/* Number input with suffix (e.g., "sec") */
+.number-input-wrapper {
+  position: relative;
+  display: inline-block;
+  width: 140px;
+}
 
-    router.register('/routine/:id', async ({ id }) => {
-      await renderRoutineDetail(app, id);
-    });
+.number-input-wrapper input[type="number"] {
+  padding-right: 44px;
+  text-align: right;
+  -moz-appearance: textfield;
+}
+
+.number-input-wrapper input[type="number"]::-webkit-outer-spin-button,
+.number-input-wrapper input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.number-input-suffix {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  font-size: 14px;
+  pointer-events: none;
+}
+
+/* Section divider */
+.form-section-divider {
+  height: 1px;
+  background-color: var(--border);
+  margin: 8px 0 20px 0;
+}
+
+/* Bold link variant (for Save button in header) */
+.btn-link-bold {
+  font-weight: 600;
+}
+
+.btn-link:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Placeholder card (used in 1.4.E.1 for the "exercises coming soon" area) */
+.placeholder-card {
+  background-color: var(--bg-elevated);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  text-align: center;
+}
+
+.placeholder-card p {
+  margin: 6px 0;
+}
+
+// main.js
+import { renderRoutineEdit } from './views/routineEdit.js';
 
