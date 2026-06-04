@@ -1,228 +1,4 @@
-// src/components/exerciseEditor.js
-/**
- * HoldOn — Exercise Editor (Modal)
- * 
- * Two modes:
- *   - 'edit': editing an existing exercise snapshot in a routine
- *   - 'create': creating a new exercise (with optional "Save to library")
- * 
- * Usage:
- *   openExerciseEditor({
- *     mode: 'edit',
- *     exercise: existingSnapshot,
- *     onSave: (updatedSnapshot) => {...},
- *   });
- *   
- *   openExerciseEditor({
- *     mode: 'create',
- *     onSave: (newSnapshot, { saveToLibrary }) => {...},
- *   });
- */
-
-import { openModal, closeModal } from './modal.js';
-import { createActivity } from '../db/store.js';
-import { generateId } from '../utils/id.js';
-
-const RANGES = {
-  workDuration: { min: 0, max: 120, label: 'seconds' },
-  restBetweenSets: { min: 0, max: 120, label: 'seconds' },
-  sets: { min: 1, max: 20, label: 'sets' },
-};
-
-/**
- * Opens the exercise editor modal.
- */
-export function openExerciseEditor({ mode, exercise, onSave }) {
-  const isCreate = mode === 'create';
-  
-  // Working draft (changes only persist on Save)
-  const draft = isCreate
-    ? {
-        id: generateId(),
-        sourceActivityId: null,
-        snapshotVersion: Date.now(),
-        name: '',
-        description: '',
-        videoUrl: '',
-        workDuration: 30,
-        restBetweenSets: 10,
-        sets: 3,
-      }
-    : { ...exercise };
-  
-  // Local state for "save to library" toggle (create mode only)
-  let saveToLibrary = isCreate;  // default ON for new activities
-  
-  const content = document.createElement('div');
-  content.className = 'exercise-editor';
-  content.innerHTML = `
-    <form class="exercise-editor-form" autocomplete="off">
-      <div class="form-group">
-        <label for="ex-name">Name</label>
-        <input
-          type="text"
-          id="ex-name"
-          placeholder="e.g., Superman Pose"
-          value="${escapeHtml(draft.name)}"
-          maxlength="80"
-          required
-        />
-        <p class="form-error" id="ex-name-error" hidden>Please enter a name.</p>
-      </div>
-      
-      <div class="form-group">
-        <label for="ex-desc">Description <span class="form-label-hint">(optional)</span></label>
-        <textarea
-          id="ex-desc"
-          placeholder="How to perform this exercise..."
-          rows="2"
-          maxlength="500"
-        >${escapeHtml(draft.description)}</textarea>
-      </div>
-      
-      <div class="form-group">
-        <label for="ex-video">Video URL <span class="form-label-hint">(optional)</span></label>
-        <input
-          type="url"
-          id="ex-video"
-          placeholder="https://youtube.com/watch?v=..."
-          value="${escapeHtml(draft.videoUrl)}"
-          maxlength="500"
-        />
-        <p class="form-hint">YouTube or Vimeo link to a demonstration.</p>
-      </div>
-      
-      <div class="form-section-divider"></div>
-      
-      <div class="form-row">
-        <div class="form-group">
-          <label for="ex-work">
-            Hold duration
-            <span class="form-label-hint">(0–120 sec)</span>
-          </label>
-          <div class="number-input-wrapper">
-            <input
-              type="number"
-              id="ex-work"
-              min="0"
-              max="120"
-              step="1"
-              value="${draft.workDuration}"
-            />
-            <span class="number-input-suffix">sec</span>
-          </div>
-          <p class="form-error" id="ex-work-error" hidden>Must be 0–120.</p>
-        </div>
-        
-        <div class="form-group">
-          <label for="ex-rest">
-            Rest between sets
-            <span class="form-label-hint">(0–120 sec)</span>
-          </label>
-          <div class="number-input-wrapper">
-            <input
-              type="number"
-              id="ex-rest"
-              min="0"
-              max="120"
-              step="1"
-              value="${draft.restBetweenSets}"
-            />
-            <span class="number-input-suffix">sec</span>
-          </div>
-          <p class="form-error" id="ex-rest-error" hidden>Must be 0–120.</p>
-        </div>
-      </div>
-      
-      <div class="form-group">
-        <label for="ex-sets">
-          Sets
-          <span class="form-label-hint">(1–20)</span>
-        </label>
-        <div class="number-input-wrapper">
-          <input
-            type="number"
-            id="ex-sets"
-            min="1"
-            max="20"
-            step="1"
-            value="${draft.sets}"
-          />
-          <span class="number-input-suffix">sets</span>
-        </div>
-        <p class="form-error" id="ex-sets-error" hidden>Must be 1–20.</p>
-      </div>
-      
-      ${isCreate ? `
-        <div class="form-section-divider"></div>
-        <div class="form-group checkbox-group">
-          <label class="checkbox-label">
-            <input type="checkbox" id="ex-save-library" checked />
-            <span>Save to library for reuse in other routines</span>
-          </label>
-        </div>
-      ` : ''}
-    </form>
-    
-    <div class="editor-actions">
-      <button type="button" class="btn btn-secondary" id="ex-cancel">Cancel</button>
-      <button type="button" class="btn btn-primary" id="ex-save">
-        ${isCreate ? 'Add Exercise' : 'Save Changes'}
-      </button>
-    </div>
-  `;
-  
-  const modal = openModal({
-    title: isCreate ? 'New Exercise' : 'Edit Exercise',
-    content,
-  });
-  
-  wireUpEditor(content, modal, draft, isCreate, () => saveToLibrary, (v) => { saveToLibrary = v; }, onSave);
-}
-
-function escapeHtml(str) {
-  if (str == null) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function wireUpEditor(content, modal, draft, isCreate, getSaveToLibrary, setSaveToLibrary, onSave) {
-  const nameInput = content.querySelector('#ex-name');
-  const descInput = content.querySelector('#ex-desc');
-  const videoInput = content.querySelector('#ex-video');
-  const workInput = content.querySelector('#ex-work');
-  const restInput = content.querySelector('#ex-rest');
-  const setsInput = content.querySelector('#ex-sets');
-  const saveBtn = content.querySelector('#ex-save');
-  const cancelBtn = content.querySelector('#ex-cancel');
-  
-  const nameError = content.querySelector('#ex-name-error');
-  const workError = content.querySelector('#ex-work-error');
-  const restError = content.querySelector('#ex-rest-error');
-  const setsError = content.querySelector('#ex-sets-error');
-  
-  // Text field bindings
-  nameInput.addEventListener('input', (e) => {
-    draft.name = e.target.value;
-    if (e.target.value.trim()) {
-      nameInput.classList.remove('input-error');
-      nameError.hidden = true;
-    }
-  });
-  
-  descInput.addEventListener('input', (e) => {
-    draft.description = e.target.value;
-  });
-  
-  videoInput.addEventListener('input', (e) => {
-    draft.videoUrl = e.target.value.trim();
-  });
-  
-  // Number field with live validation
+// Number field with live validation
   function bindNumberInput(input, errorEl, field, min, max) {
     input.addEventListener('input', (e) => {
       const raw = e.target.value;
@@ -238,6 +14,8 @@ function wireUpEditor(content, modal, draft, isCreate, getSaveToLibrary, setSave
         input.classList.add('input-error');
         errorEl.hidden = false;
       }
+      
+      updateSaveButtonState();
     });
     
     input.addEventListener('blur', (e) => {
@@ -247,217 +25,104 @@ function wireUpEditor(content, modal, draft, isCreate, getSaveToLibrary, setSave
         draft[field] = min;
         input.classList.remove('input-error');
         errorEl.hidden = true;
+        updateSaveButtonState();
       }
     });
   }
   
-  bindNumberInput(workInput, workError, 'workDuration', 0, 120);
-  bindNumberInput(restInput, restError, 'restBetweenSets', 0, 120);
-  bindNumberInput(setsInput, setsError, 'sets', 1, 20);
-  
-  // "Save to library" checkbox (create mode only)
-  if (isCreate) {
-    const libCheckbox = content.querySelector('#ex-save-library');
-    if (libCheckbox) {
-      libCheckbox.addEventListener('change', (e) => {
-        setSaveToLibrary(e.target.checked);
-      });
-    }
+  // Check if the form is currently valid (for enabling/disabling save button)
+  function isFormValid() {
+    const nameOk = (draft.name || '').trim().length > 0;
+    const workOk = !isNaN(draft.workDuration) && draft.workDuration >= 0 && draft.workDuration <= 120;
+    const restOk = !isNaN(draft.restBetweenSets) && draft.restBetweenSets >= 0 && draft.restBetweenSets <= 120;
+    const setsOk = !isNaN(draft.sets) && draft.sets >= 1 && draft.sets <= 20;
+    return nameOk && workOk && restOk && setsOk;
   }
   
-  // Cancel
-  cancelBtn.addEventListener('click', () => closeModal(modal));
-  
-  // Save
-  saveBtn.addEventListener('click', async () => {
-    // Validate name
-    const trimmedName = (draft.name || '').trim();
-    if (!trimmedName) {
-      nameInput.classList.add('input-error');
-      nameError.hidden = false;
-      nameInput.focus();
-      return;
-    }
-    draft.name = trimmedName;
-    draft.description = (draft.description || '').trim();
-    draft.videoUrl = (draft.videoUrl || '').trim();
-    
-    // Validate ranges
-    if (draft.workDuration < 0 || draft.workDuration > 120 || isNaN(draft.workDuration)) {
-      workInput.classList.add('input-error');
-      workError.hidden = false;
-      workInput.focus();
-      return;
-    }
-    if (draft.restBetweenSets < 0 || draft.restBetweenSets > 120 || isNaN(draft.restBetweenSets)) {
-      restInput.classList.add('input-error');
-      restError.hidden = false;
-      restInput.focus();
-      return;
-    }
-    if (draft.sets < 1 || draft.sets > 20 || isNaN(draft.sets)) {
-      setsInput.classList.add('input-error');
-      setsError.hidden = false;
-      setsInput.focus();
-      return;
-    }
-    
-    saveBtn.disabled = true;
-    saveBtn.textContent = 'Saving...';
-    
-    try {
-      // If creating new + "save to library" is checked, create library activity
-      if (isCreate && getSaveToLibrary()) {
-        const newActivity = await createActivity({
-          name: draft.name,
-          description: draft.description,
-          videoUrl: draft.videoUrl,
-          defaultWorkDuration: draft.workDuration,
-          defaultRestBetweenSets: draft.restBetweenSets,
-          defaultSets: draft.sets,
-          isSeeded: false,
-        });
-        // Link the snapshot to the new library activity
-        draft.sourceActivityId = newActivity.id;
-        draft.snapshotVersion = newActivity.updatedAt;
-      }
-      
-      closeModal(modal);
-      // Small delay for close animation
-      setTimeout(() => {
-        if (typeof onSave === 'function') {
-          onSave(draft, { saveToLibrary: isCreate && getSaveToLibrary() });
-        }
-      }, 100);
-    } catch (err) {
-      console.error('Failed to save exercise:', err);
-      alert('Failed to save: ' + err.message);
+  function updateSaveButtonState() {
+    if (isFormValid()) {
       saveBtn.disabled = false;
-      saveBtn.textContent = isCreate ? 'Add Exercise' : 'Save Changes';
+      saveBtn.classList.remove('btn-disabled');
+    } else {
+      saveBtn.disabled = true;
+      saveBtn.classList.add('btn-disabled');
     }
-  });
-  
-  // Auto-focus name field
-  setTimeout(() => nameInput.focus(), 100);
-}
-
-// Style
-/* === Exercise Editor === */
-
-.exercise-editor {
-  display: flex;
-  flex-direction: column;
-}
-
-.exercise-editor-form {
-  display: flex;
-  flex-direction: column;
-}
-
-/* Two-column row for hold/rest on wider screens */
-.form-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-
-@media (max-width: 380px) {
-  .form-row {
-    grid-template-columns: 1fr;
-    gap: 0;
   }
-}
 
-.form-row .form-group {
-  margin-bottom: 16px;
-}
 
-.form-row .number-input-wrapper {
-  width: 100%;
-}
-
-/* Checkbox group */
-.checkbox-group {
-  margin-bottom: 8px;
-}
-
-.checkbox-label {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  cursor: pointer;
-  font-size: 14px;
-  line-height: 1.4;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-.checkbox-label input[type="checkbox"] {
-  flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  margin: 0;
-  margin-top: 1px;
-  accent-color: var(--accent);
-  cursor: pointer;
-}
-
-.checkbox-label span {
-  color: var(--text);
-}
-
-/* Editor action buttons */
-.editor-actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
-}
-
-.editor-actions .btn {
-  flex: 1;
-}
-
-// src/views/routineEdit.js
-import { getRoutine, createRoutine, updateRoutine } from '../db/store.js';
-import { router } from '../utils/router.js';
-import { openActivityPicker } from '../components/activityPicker.js';
-import { openExerciseEditor } from '../components/exerciseEditor.js';
-
-function handleEditExercise(exerciseId) {
-    const exercise = draft.exercises.find((e) => e.id === exerciseId);
-    if (!exercise) return;
+/// routineEdit.js
+  restInput.addEventListener('input', (e) => {
+    const raw = e.target.value;
+    const value = parseInt(raw, 10);
+    const isValid = !isNaN(value) && value >= 0 && value <= 120;
     
-    openExerciseEditor({
-      mode: 'edit',
-      exercise,
-      onSave: (updatedSnapshot) => {
-        // Replace the exercise in the draft with the updated version
-        const idx = draft.exercises.findIndex((e) => e.id === exerciseId);
-        if (idx !== -1) {
-          draft.exercises[idx] = updatedSnapshot;
-          renderExerciseList();
-        }
-      },
-    });
+    draft.restBetweenExercises = isNaN(value) ? 0 : value;
+    
+    if (raw === '' || isValid) {
+      restInput.classList.remove('input-error');
+      restErrorEl.hidden = true;
+    } else {
+      restInput.classList.add('input-error');
+      restErrorEl.hidden = false;
+    }
+    
+    updateSaveButtonState();
+  });
+
+
+titleInput.addEventListener('input', (e) => {
+    draft.title = e.target.value;
+    updateSaveButtonState();
+  });
+
+// following code before  async function handleSave() { definition
+
+  function isFormValid() {
+    const titleOk = (draft.title || '').trim().length > 0;
+    const restOk = !isNaN(draft.restBetweenExercises) 
+      && draft.restBetweenExercises >= 0 
+      && draft.restBetweenExercises <= 120;
+    return titleOk && restOk;
+  }
+  
+  function updateSaveButtonState() {
+    if (isFormValid()) {
+      saveBtn.disabled = false;
+      saveBtn.classList.remove('btn-disabled');
+    } else {
+      saveBtn.disabled = true;
+      saveBtn.classList.add('btn-disabled');
+    }
   }
 
-function handleAddExercise() {
-    openActivityPicker({
-      onPick: (snapshot) => {
-        draft.exercises.push(snapshot);
-        renderExerciseList();
-      },
-      onCreateNew: () => {
-        openExerciseEditor({
-          mode: 'create',
-          onSave: (newSnapshot) => {
-            draft.exercises.push(newSnapshot);
-            renderExerciseList();
-          },
-        });
-      },
-    });
+
+// Update  ,,,,
+  // Initial validation check
+  updateSaveButtonState();
+  
+  if (!isEditMode) {
+    setTimeout(() => titleInput.focus(), 50);
   }
+}
+
+
+// 
+/* === Disabled Button States === */
+
+.btn:disabled,
+.btn.btn-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.btn-link:disabled,
+.btn-link.btn-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+
+
 
