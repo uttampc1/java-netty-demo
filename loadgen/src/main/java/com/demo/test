@@ -1,128 +1,168 @@
-// Number field with live validation
-  function bindNumberInput(input, errorEl, field, min, max) {
-    input.addEventListener('input', (e) => {
-      const raw = e.target.value;
-      const value = parseInt(raw, 10);
-      const isValid = !isNaN(value) && value >= min && value <= max;
-      
-      draft[field] = isNaN(value) ? min : value;
-      
-      if (raw === '' || isValid) {
-        input.classList.remove('input-error');
-        errorEl.hidden = true;
-      } else {
-        input.classList.add('input-error');
-        errorEl.hidden = false;
-      }
-      
-      updateSaveButtonState();
-    });
-    
-    input.addEventListener('blur', (e) => {
-      const value = parseInt(e.target.value, 10);
-      if (isNaN(value) || e.target.value === '') {
-        input.value = min;
-        draft[field] = min;
-        input.classList.remove('input-error');
-        errorEl.hidden = true;
-        updateSaveButtonState();
-      }
-    });
-  }
-  
-  // Check if the form is currently valid (for enabling/disabling save button)
-  function isFormValid() {
-    const nameOk = (draft.name || '').trim().length > 0;
-    const workOk = !isNaN(draft.workDuration) && draft.workDuration >= 0 && draft.workDuration <= 120;
-    const restOk = !isNaN(draft.restBetweenSets) && draft.restBetweenSets >= 0 && draft.restBetweenSets <= 120;
-    const setsOk = !isNaN(draft.sets) && draft.sets >= 1 && draft.sets <= 20;
-    return nameOk && workOk && restOk && setsOk;
-  }
-  
-  function updateSaveButtonState() {
-    if (isFormValid()) {
-      saveBtn.disabled = false;
-      saveBtn.classList.remove('btn-disabled');
-    } else {
-      saveBtn.disabled = true;
-      saveBtn.classList.add('btn-disabled');
-    }
-  }
+// src/views/settings.js
+/**
+ * HoldOn — Settings View
+ * 
+ * Top-level settings screen accessed from home (gear icon).
+ * Sections:
+ *   - Activity Library (manage seeded + custom activities)
+ *   - Cue Defaults (global default cue settings)
+ *   - Data (export/import)
+ *   - About
+ * 
+ * Step 1.4.F.1 — Scaffold only. Sections filled in 1.4.F.2 and 1.4.F.3.
+ */
 
+import { router } from '../utils/router.js';
 
-/// routineEdit.js
-  restInput.addEventListener('input', (e) => {
-    const raw = e.target.value;
-    const value = parseInt(raw, 10);
-    const isValid = !isNaN(value) && value >= 0 && value <= 120;
-    
-    draft.restBetweenExercises = isNaN(value) ? 0 : value;
-    
-    if (raw === '' || isValid) {
-      restInput.classList.remove('input-error');
-      restErrorEl.hidden = true;
-    } else {
-      restInput.classList.add('input-error');
-      restErrorEl.hidden = false;
-    }
-    
-    updateSaveButtonState();
-  });
+export async function renderSettings(container) {
+  container.innerHTML = `
+    <main class="container">
+      <header class="screen-header">
+        <button class="btn-link" id="back-btn">← Back</button>
+        <h2>Settings</h2>
+        <div class="header-spacer"></div>
+      </header>
 
+      <section class="settings-section">
+        <h3 class="settings-section-title">Activity Library</h3>
+        <div class="settings-card">
+          <div id="library-content">
+            <p class="muted settings-placeholder">Library management coming in Step 1.4.F.2.</p>
+          </div>
+        </div>
+      </section>
 
-titleInput.addEventListener('input', (e) => {
-    draft.title = e.target.value;
-    updateSaveButtonState();
-  });
+      <section class="settings-section">
+        <h3 class="settings-section-title">Cue Defaults</h3>
+        <div class="settings-card">
+          <div id="cues-content">
+            <p class="muted settings-placeholder">Cue settings coming in Step 1.4.F.3.</p>
+          </div>
+        </div>
+      </section>
 
-// following code before  async function handleSave() { definition
+      <section class="settings-section">
+        <h3 class="settings-section-title">Data</h3>
+        <div class="settings-card">
+          <div id="data-content">
+            <p class="muted settings-placeholder">Export / import coming in Step 1.4.F.3.</p>
+          </div>
+        </div>
+      </section>
 
-  function isFormValid() {
-    const titleOk = (draft.title || '').trim().length > 0;
-    const restOk = !isNaN(draft.restBetweenExercises) 
-      && draft.restBetweenExercises >= 0 
-      && draft.restBetweenExercises <= 120;
-    return titleOk && restOk;
-  }
-  
-  function updateSaveButtonState() {
-    if (isFormValid()) {
-      saveBtn.disabled = false;
-      saveBtn.classList.remove('btn-disabled');
-    } else {
-      saveBtn.disabled = true;
-      saveBtn.classList.add('btn-disabled');
-    }
-  }
+      <section class="settings-section">
+        <h3 class="settings-section-title">About</h3>
+        <div class="settings-card">
+          <div id="about-content">
+            <p class="muted settings-placeholder">About info coming in Step 1.4.F.3.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+  `;
 
-
-// Update  ,,,,
-  // Initial validation check
-  updateSaveButtonState();
-  
-  if (!isEditMode) {
-    setTimeout(() => titleInput.focus(), 50);
-  }
+  container.querySelector('#back-btn').addEventListener('click', () => router.navigate('/'));
 }
 
+// src/views/routineList.js
 
-// 
-/* === Disabled Button States === */
+  container.innerHTML = `
+    <main class="container">
+      <header class="app-header app-header-with-action">
+        <div class="app-header-content">
+          <h1>HoldOn</h1>
+          <p class="tagline">Simple timers for poses, holds & reps.</p>
+        </div>
+        <button class="settings-icon-btn" id="settings-btn" aria-label="Settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+      </header>
 
-.btn:disabled,
-.btn.btn-disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  pointer-events: none;
+      <div class="list-actions">
+        <button class="btn btn-primary" id="new-routine-btn">
+          <span class="btn-icon">+</span>
+          <span>New Routine</span>
+        </button>
+      </div>
+
+
+/* === Step 1.4.F.1 — Settings Screen + Gear Icon === */
+
+/* Home header with action button (gear icon) */
+.app-header-with-action {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
 }
 
-.btn-link:disabled,
-.btn-link.btn-disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  pointer-events: none;
+.app-header-with-action .app-header-content {
+  flex: 1;
+  text-align: center;
+  /* offset to visually center title accounting for gear icon */
+  padding-left: 40px;
 }
 
+.app-header-with-action h1,
+.app-header-with-action .tagline {
+  text-align: center;
+}
 
+.settings-icon-btn {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+  margin-top: 4px;
+}
 
+.settings-icon-btn:hover {
+  background-color: var(--bg-elevated);
+  color: var(--text);
+}
 
+.settings-icon-btn:active {
+  transform: scale(0.95);
+}
+
+/* Settings screen layout */
+.settings-section {
+  margin-bottom: 28px;
+}
+
+.settings-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 10px 4px;
+}
+
+.settings-card {
+  background-color: var(--bg-elevated);
+  border-radius: var(--radius);
+  padding: 4px 0;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.settings-placeholder {
+  text-align: center;
+  padding: 24px 16px;
+  margin: 0;
+  font-size: 14px;
+}
