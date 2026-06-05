@@ -1,118 +1,439 @@
-// src/views/routineEdit.js
-   const exercisesHtml = draft.exercises.map((ex, idx) => `
-      <div class="exercise-row" data-exercise-id="${escapeHtml(ex.id)}">
-        <div class="exercise-drag-handle" aria-label="Drag to reorder">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
-            <line x1="4" y1="8" x2="20" y2="8"/>
-            <line x1="4" y1="16" x2="20" y2="16"/>
-          </svg>
-        </div>
-        <div class="exercise-row-main">
-          <div class="exercise-row-content">
-            <div class="exercise-row-name">${escapeHtml(ex.name)}</div>
-            <div class="exercise-row-meta">
-              ${ex.workDuration}s × ${ex.sets} set${ex.sets === 1 ? '' : 's'}${ex.sets > 1 && ex.restBetweenSets > 0 ? ` · ${ex.restBetweenSets}s rest` : ''}
-            </div>
-          </div>
-        </div>
-        <div class="exercise-row-actions">
-          <button type="button" class="btn-icon-only" data-action="edit-exercise" data-exercise-id="${escapeHtml(ex.id)}" aria-label="Edit">
-            ✎
-          </button>
-          <button type="button" class="btn-icon-only btn-icon-danger" data-action="remove-exercise" data-exercise-id="${escapeHtml(ex.id)}" aria-label="Remove">
-            ✕
-          </button>
-        </div>
-      </div>
-    `).join('');
+//  src/views/player.js
+/**
+ * HoldOn — Session Player (Workout Runner)
+ * 
+ * Full-screen view that guides user through a workout routine.
+ * Step 2.1: Static skeleton. Timer engine and cues come in 2.2+.
+ * 
+ * Route: #/play/:routineId
+ */
 
-// add just before ...
-    // Enable drag-to-reorder
-    const listEl = container.querySelector('#exercise-list');
-    if (listEl && draft.exercises.length > 1) {
-      Sortable.create(listEl, {
-        handle: '.exercise-drag-handle',
-        animation: 150,
-        ghostClass: 'exercise-row-ghost',
-        chosenClass: 'exercise-row-chosen',
-        dragClass: 'exercise-row-drag',
-        forceFallback: true,  // consistent behavior across browsers (especially iOS)
-        fallbackTolerance: 5,
-        onEnd: (evt) => {
-          // Reorder the draft.exercises array to match the new DOM order
-          if (evt.oldIndex === evt.newIndex) return;
-          
-          const [moved] = draft.exercises.splice(evt.oldIndex, 1);
-          draft.exercises.splice(evt.newIndex, 0, moved);
-          
-          console.log('[Reorder] Moved from', evt.oldIndex, 'to', evt.newIndex);
-        },
-      });
-    }
+import { getRoutine } from '../db/store.js';
+import { router } from '../utils/router.js';
+import { confirmModal, alertModal } from '../components/dialog.js';
+
+export async function renderPlayer(container, routineId) {
+  let routine;
+  try {
+    routine = await getRoutine(routineId);
+  } catch (err) {
+    console.error('[Player] Failed to load routine:', err);
+    await alertModal({
+      title: 'Could not load routine',
+      message: err.message || 'The routine could not be found.',
+    });
+    router.navigate('/');
+    return;
   }
-
-/* === Step 1.4.G.3 — Drag-to-Reorder === */
-
-.exercise-row {
-  position: relative;
-  /* existing styles preserved */
+  
+  if (!routine) {
+    await alertModal({
+      title: 'Routine not found',
+      message: 'This routine no longer exists.',
+    });
+    router.navigate('/');
+    return;
+  }
+  
+  if (!routine.exercises || routine.exercises.length === 0) {
+    await alertModal({
+      title: 'No exercises',
+      message: 'This routine has no exercises. Add some first!',
+    });
+    router.navigate(`/routine/${routineId}`);
+    return;
+  }
+  
+  // Initial display state (static for Step 2.1 — driven by timer engine in 2.3)
+  const initialState = {
+    routine,
+    currentExerciseIndex: 0,
+    currentSet: 1,
+    phase: 'prep',  // 'prep' | 'work' | 'rest-set' | 'rest-exercise' | 'complete'
+    timeRemaining: 3,  // seconds — will be dynamic in 2.2
+  };
+  
+  renderPlayerUI(container, initialState);
 }
 
-.exercise-drag-handle {
+function renderPlayerUI(container, state) {
+  const { routine, currentExerciseIndex, currentSet, phase, timeRemaining } = state;
+  const currentExercise = routine.exercises[currentExerciseIndex];
+  
+  const phaseInfo = getPhaseInfo(phase);
+  const nextUp = getNextUpLabel(state);
+  
+  container.innerHTML = `
+    <div class="player" data-phase="${phase}">
+      <div class="player-top">
+        <div class="player-routine-title">${escapeHtml(routine.title)}</div>
+      </div>
+      
+      <div class="player-main">
+        <div class="player-exercise-name">${escapeHtml(currentExercise.name)}</div>
+        
+        ${currentExercise.sets > 1 ? `
+          <div class="player-set-counter">Set ${currentSet} of ${currentExercise.sets}</div>
+        ` : ''}
+        
+        <div class="player-phase-label">
+          <span class="player-phase-dot"></span>
+          ${escapeHtml(phaseInfo.label)}
+        </div>
+        
+        <div class="player-timer" id="player-timer">${formatTime(timeRemaining)}</div>
+        
+        ${nextUp ? `
+          <div class="player-next">${escapeHtml(nextUp)}</div>
+        ` : ''}
+      </div>
+      
+      <div class="player-controls">
+        <button type="button" class="player-control-btn player-pause-btn" id="player-pause-btn">
+          <span class="player-control-icon">⏸</span>
+          <span class="player-control-label">Pause</span>
+        </button>
+        <button type="button" class="player-control-btn player-skip-btn" id="player-skip-btn">
+          <span class="player-control-icon">⏭</span>
+          <span class="player-control-label">Skip</span>
+        </button>
+        <button type="button" class="player-control-btn player-exit-btn" id="player-exit-btn">
+          <span class="player-control-icon">✕</span>
+          <span class="player-control-label">Exit</span>
+        </button>
+      </div>
+    </div>
+  `;
+  
+  wirePlayerControls(container, state);
+}
+
+function wirePlayerControls(container, state) {
+  const pauseBtn = container.querySelector('#player-pause-btn');
+  const skipBtn = container.querySelector('#player-skip-btn');
+  const exitBtn = container.querySelector('#player-exit-btn');
+  
+  pauseBtn.addEventListener('click', async () => {
+    // Placeholder for Step 2.5
+    await alertModal({
+      title: 'Pause',
+      message: 'Pause/resume coming in Step 2.5.',
+    });
+  });
+  
+  skipBtn.addEventListener('click', async () => {
+    // Placeholder for Step 2.5
+    await alertModal({
+      title: 'Skip',
+      message: 'Skip control coming in Step 2.5.',
+    });
+  });
+  
+  exitBtn.addEventListener('click', async () => {
+    const confirmed = await confirmModal({
+      title: 'Exit workout?',
+      message: 'Your progress will not be saved.',
+      confirmLabel: 'Exit',
+      cancelLabel: 'Keep going',
+      danger: true,
+    });
+    if (confirmed) {
+      router.navigate(`/routine/${state.routine.id}`);
+    }
+  });
+}
+
+// ============================================================
+// HELPERS
+// ============================================================
+
+function getPhaseInfo(phase) {
+  const phaseMap = {
+    'prep':         { label: 'Get Ready', color: 'amber' },
+    'work':         { label: 'Work',      color: 'blue' },
+    'rest-set':     { label: 'Rest',      color: 'green' },
+    'rest-exercise':{ label: 'Rest',      color: 'green' },
+    'complete':     { label: 'Complete!', color: 'gold' },
+  };
+  return phaseMap[phase] || { label: phase, color: 'gray' };
+}
+
+function getNextUpLabel(state) {
+  const { routine, currentExerciseIndex, currentSet, phase } = state;
+  const currentExercise = routine.exercises[currentExerciseIndex];
+  
+  if (phase === 'prep') {
+    return `Next: Work (${currentExercise.workDuration}s)`;
+  }
+  
+  if (phase === 'work') {
+    // Is there another set of this exercise?
+    if (currentSet < currentExercise.sets) {
+      return currentExercise.restBetweenSets > 0
+        ? `Next: Rest (${currentExercise.restBetweenSets}s)`
+        : `Next: Set ${currentSet + 1}`;
+    }
+    // Last set of this exercise — is there a next exercise?
+    if (currentExerciseIndex < routine.exercises.length - 1) {
+      const nextEx = routine.exercises[currentExerciseIndex + 1];
+      return routine.restBetweenExercises > 0
+        ? `Next: Rest (${routine.restBetweenExercises}s) → ${nextEx.name}`
+        : `Next: ${nextEx.name}`;
+    }
+    return 'Last set!';
+  }
+  
+  if (phase === 'rest-set') {
+    return `Next: Set ${currentSet + 1} of ${currentExercise.sets}`;
+  }
+  
+  if (phase === 'rest-exercise') {
+    const nextEx = routine.exercises[currentExerciseIndex + 1];
+    return nextEx ? `Next: ${nextEx.name}` : '';
+  }
+  
+  return '';
+}
+
+function formatTime(seconds) {
+  if (seconds == null || seconds < 0) return '00:00';
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// src/views/routineDetail.js   
+container.querySelector('#start-btn').addEventListener('click', () => {
+    if (!routine.exercises || routine.exercises.length === 0) {
+      alertModal({
+        title: 'No exercises',
+        message: 'Add at least one exercise before starting.',
+      });
+      return;
+    }
+    router.navigate(`/play/${routine.id}`);
+  });
+
+// Styles
+/* === Phase 2 / Step 2.1 — Session Player === */
+
+.player {
+  position: fixed;
+  inset: 0;
   display: flex;
+  flex-direction: column;
+  background-color: var(--bg);
+  color: var(--text);
+  z-index: 1000;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  overflow: hidden;
+}
+
+/* Top: routine title */
+.player-top {
+  flex-shrink: 0;
+  padding: 20px 20px 0;
+  text-align: center;
+}
+
+.player-routine-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* Main: exercise + timer */
+.player-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  flex-shrink: 0;
-  color: var(--text-muted);
-  cursor: grab;
-  touch-action: none;  /* prevents touch scroll interference */
-  -webkit-tap-highlight-color: transparent;
-  user-select: none;
-  -webkit-user-select: none;
-  transition: color 0.15s ease;
+  gap: 12px;
+  padding: 20px;
+  min-height: 0;
+  text-align: center;
 }
 
-.exercise-drag-handle:hover {
+.player-exercise-name {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
   color: var(--text);
+  line-height: 1.2;
+  max-width: 100%;
+  word-wrap: break-word;
 }
 
-.exercise-drag-handle:active {
-  cursor: grabbing;
+.player-set-counter {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
-/* While dragging — the original spot (shown as a "ghost") */
-.exercise-row-ghost {
-  opacity: 0.3;
+.player-phase-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 16px;
+  background-color: var(--bg-elevated);
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text);
+  margin-top: 4px;
+}
+
+.player-phase-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--text-muted);
+  display: inline-block;
+}
+
+/* Phase-specific colors */
+.player[data-phase="prep"] .player-phase-dot {
+  background-color: #ff9500;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.player[data-phase="work"] .player-phase-dot {
+  background-color: #007aff;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.player[data-phase="rest-set"] .player-phase-dot,
+.player[data-phase="rest-exercise"] .player-phase-dot {
+  background-color: #34c759;
+}
+.player[data-phase="complete"] .player-phase-dot {
+  background-color: #ffd700;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+/* The big timer display */
+.player-timer {
+  font-size: 96px;
+  font-weight: 200;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  margin: 12px 0;
+  font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+}
+
+/* Larger timer on bigger screens */
+@media (min-height: 700px) {
+  .player-timer {
+    font-size: 128px;
+  }
+}
+
+@media (min-height: 900px) {
+  .player-timer {
+    font-size: 160px;
+  }
+}
+
+.player-next {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-top: 8px;
+  max-width: 100%;
+  word-wrap: break-word;
+}
+
+/* Controls at bottom */
+.player-controls {
+  flex-shrink: 0;
+  display: flex;
+  gap: 8px;
+  padding: 16px 20px 24px;
+  justify-content: space-around;
+}
+
+.player-control-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  padding: 12px 8px;
+  border-radius: var(--radius);
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background-color 0.15s ease, transform 0.05s ease;
+  -webkit-tap-highlight-color: transparent;
+  min-height: 64px;
+}
+
+.player-control-btn:hover {
   background-color: var(--bg-elevated);
 }
 
-/* The row that's currently being dragged */
-.exercise-row-chosen {
-  /* SortableJS adds this when drag starts but before move */
-}
-
-/* The floating clone that follows the pointer */
-.exercise-row-drag {
-  opacity: 0.95;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-  transform: scale(1.02);
-  background-color: var(--bg);
-  border-radius: var(--radius-sm);
+.player-control-btn:active {
+  transform: scale(0.96);
+  background-color: rgba(0, 0, 0, 0.08);
 }
 
 @media (prefers-color-scheme: dark) {
-  .exercise-row-drag {
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-    background-color: var(--bg-elevated);
+  .player-control-btn:active {
+    background-color: rgba(255, 255, 255, 0.1);
   }
 }
 
-/* Ensure the exercise row layout includes the handle */
-.exercise-row {
-  display: flex;
-  align-items: center;
-  /* preserve any existing properties */
+.player-control-icon {
+  font-size: 22px;
+  line-height: 1;
 }
 
+.player-control-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
 
+.player-exit-btn .player-control-icon,
+.player-exit-btn .player-control-label {
+  color: #ff3b30;
+}
+
+@media (prefers-color-scheme: dark) {
+  .player-exit-btn .player-control-icon,
+  .player-exit-btn .player-control-label {
+    color: #ff453a;
+  }
+}
+
+/* Subtle background tinting for active phases (very subtle) */
+.player[data-phase="work"] {
+  background-color: var(--bg);
+}
+
+.player[data-phase="rest-set"],
+.player[data-phase="rest-exercise"] {
+  background-color: var(--bg);
+}
