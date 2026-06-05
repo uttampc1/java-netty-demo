@@ -1,158 +1,191 @@
-// src/views/aboutSection.js
+// src/components/dialog.js
 /**
- * HoldOn — About Section (rendered inside Settings)
+ * HoldOn — Branded Dialog Helpers
  * 
- * Static informational content. No interactions beyond
- * a future GitHub link (added post-deploy in Step 1.5).
+ * Promise-based replacements for native confirm() and alert().
+ * Match the app's modal design language (dark mode, mobile slide-up, etc.).
+ * 
+ * Usage:
+ *   const ok = await confirmModal({ title: 'Delete?', message: 'Are you sure?' });
+ *   if (ok) { ... }
+ *   
+ *   await alertModal({ title: 'Error', message: 'Something went wrong.' });
  */
 
-// __APP_VERSION__ is a build-time constant defined in vite.config.js
-const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';
+import { openModal, closeModal } from './modal.js';
 
-export function renderAboutSection(container) {
-  container.innerHTML = `
-    <div class="about-section">
-      <div class="about-header">
-        <div class="about-name">HoldOn</div>
-        <div class="about-version">Version ${APP_VERSION}</div>
-        <div class="about-tagline">Simple timers for poses, holds &amp; reps.</div>
+/**
+ * Shows a confirmation dialog. Returns a Promise that resolves to true/false.
+ * 
+ * @param {Object} options
+ * @param {string} options.title         - Modal title
+ * @param {string} options.message       - Body message (supports basic line breaks via \n)
+ * @param {string} [options.confirmLabel='Confirm'] - Label for the confirm button
+ * @param {string} [options.cancelLabel='Cancel']   - Label for the cancel button
+ * @param {boolean} [options.danger=false]          - If true, confirm button is red
+ * @returns {Promise<boolean>}
+ */
+export function confirmModal({
+  title,
+  message,
+  confirmLabel = 'Confirm',
+  cancelLabel = 'Cancel',
+  danger = false,
+}) {
+  return new Promise((resolve) => {
+    const content = document.createElement('div');
+    content.className = 'dialog-content';
+    content.innerHTML = `
+      <p class="dialog-message">${formatMessage(message)}</p>
+      
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-secondary" id="dialog-cancel-btn">
+          ${escapeHtml(cancelLabel)}
+        </button>
+        <button type="button" class="btn ${danger ? 'btn-danger' : 'btn-primary'}" id="dialog-confirm-btn">
+          ${escapeHtml(confirmLabel)}
+        </button>
       </div>
+    `;
+    
+    const modal = openModal({
+      title,
+      content,
+    });
+    
+    let resolved = false;
+    const finish = (result) => {
+      if (resolved) return;
+      resolved = true;
+      closeModal(modal);
+      resolve(result);
+    };
+    
+    content.querySelector('#dialog-cancel-btn').addEventListener('click', () => finish(false));
+    content.querySelector('#dialog-confirm-btn').addEventListener('click', () => finish(true));
+    
+    // If user dismisses via backdrop click or Escape, treat as cancel
+    const originalOnClose = modal.onClose;
+    modal.onClose = () => {
+      if (originalOnClose) originalOnClose();
+      if (!resolved) {
+        resolved = true;
+        resolve(false);
+      }
+    };
+    
+    // Auto-focus the cancel button by default (safer for destructive actions)
+    setTimeout(() => {
+      content.querySelector('#dialog-cancel-btn').focus();
+    }, 100);
+  });
+}
 
-      <div class="settings-divider"></div>
-
-      <div class="about-block">
-        <div class="about-block-title">🔒 Privacy</div>
-        <p class="about-block-text">
-          Your routines, activities, and workout history stay on your device.
-          No accounts, no cloud sync, no tracking.
-        </p>
-        <p class="about-block-text about-block-subtle">
-          When deployed publicly, anonymous and cookieless usage statistics
-          may help improve the app — no personal data is ever collected.
-        </p>
+/**
+ * Shows a simple alert dialog. Returns a Promise that resolves when dismissed.
+ * 
+ * @param {Object} options
+ * @param {string} options.title         - Modal title
+ * @param {string} options.message       - Body message (supports basic line breaks via \n)
+ * @param {string} [options.buttonLabel='OK'] - Label for the dismiss button
+ * @returns {Promise<void>}
+ */
+export function alertModal({
+  title,
+  message,
+  buttonLabel = 'OK',
+}) {
+  return new Promise((resolve) => {
+    const content = document.createElement('div');
+    content.className = 'dialog-content';
+    content.innerHTML = `
+      <p class="dialog-message">${formatMessage(message)}</p>
+      
+      <div class="dialog-actions dialog-actions-single">
+        <button type="button" class="btn btn-primary" id="dialog-ok-btn">
+          ${escapeHtml(buttonLabel)}
+        </button>
       </div>
+    `;
+    
+    const modal = openModal({
+      title,
+      content,
+    });
+    
+    let resolved = false;
+    const finish = () => {
+      if (resolved) return;
+      resolved = true;
+      closeModal(modal);
+      resolve();
+    };
+    
+    content.querySelector('#dialog-ok-btn').addEventListener('click', finish);
+    
+    // If user dismisses via backdrop click or Escape, resolve normally
+    const originalOnClose = modal.onClose;
+    modal.onClose = () => {
+      if (originalOnClose) originalOnClose();
+      if (!resolved) {
+        resolved = true;
+        resolve();
+      }
+    };
+    
+    setTimeout(() => {
+      content.querySelector('#dialog-ok-btn').focus();
+    }, 100);
+  });
+}
 
-      <div class="settings-divider"></div>
+function formatMessage(message) {
+  if (message == null) return '';
+  return escapeHtml(String(message)).replace(/\n/g, '<br>');
+}
 
-      <div class="about-block">
-        <div class="about-block-title">⚙️ Built With</div>
-        <ul class="about-tech-list">
-          <li>Vite (build tool)</li>
-          <li>IndexedDB (local storage)</li>
-          <li>Service Workers (offline support)</li>
-          <li>Vanilla JavaScript &amp; CSS</li>
-          <li>❤️ for clean, simple UIs</li>
-        </ul>
-      </div>
-
-      <div class="settings-divider"></div>
-
-      <div class="about-block">
-        <div class="about-block-title">📜 License</div>
-        <p class="about-block-text">
-          MIT License — free to use, modify, and share.
-        </p>
-      </div>
-
-      <div class="settings-divider"></div>
-
-      <div class="about-footer">
-        <p class="about-footer-text">
-          Made with care · <span class="about-footer-version">v${APP_VERSION}</span>
-        </p>
-      </div>
-    </div>
-  `;
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // style
-/* === Step 1.4.F.3.C — About Section === */
+/* === Step 1.4.G.1 — Branded Dialogs (confirm/alert helpers) === */
 
-.about-section {
-  padding: 4px 0;
+.dialog-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.about-header {
-  padding: 20px 16px 16px;
-  text-align: center;
-}
-
-.about-name {
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--text);
-  margin-bottom: 4px;
-}
-
-.about-version {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-  margin-bottom: 8px;
-}
-
-.about-tagline {
-  font-size: 14px;
-  color: var(--text-muted);
-  line-height: 1.4;
-}
-
-.about-block {
-  padding: 14px 16px;
-}
-
-.about-block-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-  margin-bottom: 6px;
-}
-
-.about-block-text {
-  margin: 0 0 6px 0;
-  font-size: 13px;
-  color: var(--text-muted);
+.dialog-message {
+  margin: 0;
+  font-size: 15px;
   line-height: 1.5;
+  color: var(--text);
+  word-wrap: break-word;
 }
 
-.about-block-text:last-child {
-  margin-bottom: 0;
+.dialog-actions {
+  display: flex;
+  gap: 10px;
 }
 
-.about-block-subtle {
-  font-size: 12px;
-  font-style: italic;
+.dialog-actions .btn {
+  flex: 1;
 }
 
-.about-tech-list {
-  margin: 0;
-  padding-left: 20px;
-  font-size: 13px;
-  line-height: 1.7;
-  color: var(--text-muted);
+/* For alert (single OK button), don't stretch full width on desktop */
+.dialog-actions-single {
+  justify-content: flex-end;
 }
 
-.about-tech-list li {
-  padding-left: 4px;
+.dialog-actions-single .btn {
+  flex: 0 1 auto;
+  min-width: 100px;
 }
-
-.about-footer {
-  padding: 16px;
-  text-align: center;
-  border-top: 1px solid var(--border);
-  margin-top: 4px;
-}
-
-.about-footer-text {
-  margin: 0;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.about-footer-version {
-  font-family: 'SF Mono', Monaco, monospace;
-  font-variant-numeric: tabular-nums;
-}
-
