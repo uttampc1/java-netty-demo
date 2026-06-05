@@ -1,230 +1,434 @@
 // src/db/store.js
-
-// ============================================================
-// IMPORT HELPERS (used by Step 1.4.F.3.B.2.C)
-// ============================================================
-
 /**
- * Deletes all custom (non-seeded) activities, all routines, and all sessions.
- * Used by the Replace import strategy. Preserves seeded activities.
+ * Wipes EVERYTHING — all stores including settings and meta.
+ * Used by the Reset feature. Caller is responsible for re-seeding afterward.
  */
-export async function wipeUserData() {
+export async function wipeAllData() {
   const db = await getDB();
-  
-  // Get all activities to identify which ones to delete (non-seeded only)
-  const activities = await db.getAll(STORE_ACTIVITIES);
-  const customActivityIds = activities
-    .filter((a) => a.isSeeded !== true)
-    .map((a) => a.id);
-  
   const tx = db.transaction(
-    [STORE_ROUTINES, STORE_ACTIVITIES, STORE_SESSIONS],
+    [STORE_ROUTINES, STORE_ACTIVITIES, STORE_SESSIONS, STORE_META],
     'readwrite'
   );
   
-  // Clear routines (full wipe — none are "seeded" by app)
   await tx.objectStore(STORE_ROUTINES).clear();
-  
-  // Clear sessions
+  await tx.objectStore(STORE_ACTIVITIES).clear();
   await tx.objectStore(STORE_SESSIONS).clear();
-  
-  // Delete only custom activities (preserve seeded ones)
-  const activityStore = tx.objectStore(STORE_ACTIVITIES);
-  for (const id of customActivityIds) {
-    await activityStore.delete(id);
-  }
+  await tx.objectStore(STORE_META).clear();
   
   await tx.done;
   
-  return {
-    routinesDeleted: true,
-    sessionsDeleted: true,
-    customActivitiesDeleted: customActivityIds.length,
-  };
+  console.log('[Reset] All data wiped from all stores.');
 }
 
-/**
- * Imports backup data using the Merge strategy (or after a wipe for Replace).
- * Always skips seeded activities in the backup.
- * Returns counts of what was actually imported.
- */
-export async function importBackupData(data) {
-  const db = await getDB();
-  
-  // Filter out seeded activities from the backup
-  const activitiesToImport = (data.activities || []).filter(
-    (a) => a && a.isSeeded !== true
-  );
-  
-  const routinesToImport = data.routines || [];
-  const sessionsToImport = data.sessions || [];
-  
-  const tx = db.transaction(
-    [STORE_ROUTINES, STORE_ACTIVITIES, STORE_SESSIONS],
-    'readwrite'
-  );
-  
-  // Import routines
-  const routineStore = tx.objectStore(STORE_ROUTINES);
-  for (const routine of routinesToImport) {
-    if (routine && routine.id) {
-      await routineStore.put(routine);
-    }
-  }
-  
-  // Import custom activities (put = upsert by id)
-  const activityStore = tx.objectStore(STORE_ACTIVITIES);
-  for (const activity of activitiesToImport) {
-    if (activity && activity.id) {
-      await activityStore.put(activity);
-    }
-  }
-  
-  // Import sessions
-  const sessionStore = tx.objectStore(STORE_SESSIONS);
-  for (const session of sessionsToImport) {
-    if (session && session.id) {
-      await sessionStore.put(session);
-    }
-  }
-  
-  await tx.done;
-  
-  return {
-    routines: routinesToImport.length,
-    customActivities: activitiesToImport.length,
-    sessions: sessionsToImport.length,
-    seededSkipped: (data.activities || []).length - activitiesToImport.length,
-  };
-}
 
 // src/views/dataSection.js
-async function executeImport(data, summary, strategy) {
-  // Show a loading modal so user knows something is happening
+// ============================================================
+// RESET
+// ============================================================
+
+async function handleReset() {
+  showResetWarning();
+}
+
+/**
+ * Modal 1: Initial warning with option to export first.
+ */
+function showResetWarning() {
+  const content = document.createElement('div');
+  content.className = 'reset-warning';
+  content.innerHTML = `
+    <div class="reset-warning-icon">⚠️</div>
+    
+    <p class="reset-warning-title">This will delete everything.</p>
+    
+    <div class="reset-warning-list">
+      <p>You're about to permanently delete:</p>
+      <ul>
+        <li>All routines</li>
+        <li>All custom activities</li>
+        <li>All workout history (sessions)</li>
+        <li>All settings (cue defaults)</li>
+      </ul>
+      <p class="reset-warning-note">
+        Seeded activities will be restored to defaults.
+        <strong>This action cannot be undone.</strong>
+      </p>
+    </div>
+    
+    <div class="reset-warning-backup">
+      <p class="reset-warning-backup-title">💾 Recommended: Back up first</p>
+      <p class="reset-warning-backup-hint">
+        Export your data now so you can restore it later if you change your mind.
+      </p>
+      <button type="button" class="btn btn-secondary reset-export-btn" id="reset-export-btn">
+        📤 Export now
+      </button>
+    </div>
+    
+    <div class="editor-actions reset-actions">
+      <button type="button" class="btn btn-secondary" id="reset-cancel-btn">Cancel</button>
+      <button type="button" class="btn btn-danger" id="reset-continue-btn">Continue to reset</button>
+    </div>
+  `;
+  
+  const modal = openModal({
+    title: 'Reset All Data',
+    content,
+  });
+  
+  content.querySelector('#reset-cancel-btn').addEventListener('click', () => {
+    closeModal(modal);
+  });
+  
+  content.querySelector('#reset-export-btn').addEventListener('click', () => {
+    // Trigger export without closing this modal — user can come back to it
+    handleExport();
+  });
+  
+  content.querySelector('#reset-continue-btn').addEventListener('click', () => {
+    closeModal(modal);
+    setTimeout(() => showResetConfirm(), 200);
+  });
+}
+
+/**
+ * Modal 2: Type DELETE to enable the destructive button.
+ */
+function showResetConfirm() {
+  const content = document.createElement('div');
+  content.className = 'reset-confirm';
+  content.innerHTML = `
+    <p class="reset-confirm-intro">
+      Type <strong>DELETE</strong> below to confirm.
+      This is your last chance to cancel.
+    </p>
+    
+    <div class="form-group">
+      <input
+        type="text"
+        id="reset-confirm-input"
+        class="reset-confirm-input"
+        placeholder="Type DELETE"
+        autocomplete="off"
+        autocapitalize="characters"
+        spellcheck="false"
+      />
+    </div>
+    
+    <div class="editor-actions reset-actions">
+      <button type="button" class="btn btn-secondary" id="reset-confirm-cancel">Cancel</button>
+      <button type="button" class="btn btn-danger" id="reset-confirm-delete" disabled>
+        Delete Everything
+      </button>
+    </div>
+  `;
+  
+  const modal = openModal({
+    title: 'Final Confirmation',
+    content,
+    dismissable: false,  // require explicit Cancel — no accidental backdrop dismiss
+  });
+  
+  const input = content.querySelector('#reset-confirm-input');
+  const deleteBtn = content.querySelector('#reset-confirm-delete');
+  const cancelBtn = content.querySelector('#reset-confirm-cancel');
+  
+  input.addEventListener('input', (e) => {
+    const value = e.target.value;
+    if (value === 'DELETE') {
+      deleteBtn.disabled = false;
+      deleteBtn.classList.remove('btn-disabled');
+    } else {
+      deleteBtn.disabled = true;
+      deleteBtn.classList.add('btn-disabled');
+    }
+  });
+  
+  cancelBtn.addEventListener('click', () => closeModal(modal));
+  
+  deleteBtn.addEventListener('click', async () => {
+    closeModal(modal);
+    setTimeout(() => executeReset(), 200);
+  });
+  
+  setTimeout(() => input.focus(), 100);
+}
+
+/**
+ * Actually wipe + re-seed, then show success.
+ */
+async function executeReset() {
   const loadingContent = document.createElement('div');
   loadingContent.className = 'import-loading';
   loadingContent.innerHTML = `
-    <p class="import-loading-text">
-      ${strategy === 'replace' ? 'Replacing your data...' : 'Merging backup...'}
-    </p>
+    <p class="import-loading-text">Resetting all data...</p>
   `;
   const loadingModal = openModal({
-    title: 'Importing...',
+    title: 'Resetting...',
     content: loadingContent,
     dismissable: false,
   });
   
   try {
-    let wipeResult = null;
-    
-    if (strategy === 'replace') {
-      wipeResult = await wipeUserData();
-      console.log('[Import] Wiped:', wipeResult);
-    }
-    
-    const importResult = await importBackupData(data);
-    console.log('[Import] Imported:', importResult);
+    await wipeAllData();
+    await seedIfNeeded();  // re-seeds activities + sample routine
     
     closeModal(loadingModal);
-    
-    // Show success modal after a brief delay (let close animation play)
-    setTimeout(() => {
-      showImportSuccess(strategy, importResult);
-    }, 200);
+    setTimeout(() => showResetSuccess(), 200);
   } catch (err) {
-    console.error('[Import] Failed:', err);
+    console.error('[Reset] Failed:', err);
     closeModal(loadingModal);
     setTimeout(() => {
-      alert('Import failed:\n\n' + err.message);
+      alert('Reset failed:\n\n' + err.message);
     }, 200);
   }
 }
 
-function showImportSuccess(strategy, result) {
+function showResetSuccess() {
   const content = document.createElement('div');
   content.className = 'import-success';
   content.innerHTML = `
     <div class="import-success-icon">✅</div>
-    <p class="import-success-title">Import complete!</p>
-    
-    <div class="import-summary">
-      <div class="import-summary-title">${strategy === 'replace' ? 'Replaced with:' : 'Imported:'}</div>
-      <ul class="import-summary-list">
-        <li>
-          <span class="import-summary-count">${result.routines}</span>
-          <span class="import-summary-label">routine${result.routines === 1 ? '' : 's'}</span>
-        </li>
-        <li>
-          <span class="import-summary-count">${result.customActivities}</span>
-          <span class="import-summary-label">custom ${result.customActivities === 1 ? 'activity' : 'activities'}</span>
-        </li>
-        <li>
-          <span class="import-summary-count">${result.sessions}</span>
-          <span class="import-summary-label">session${result.sessions === 1 ? '' : 's'}</span>
-        </li>
-        ${result.seededSkipped > 0 ? `
-          <li class="import-summary-skipped">
-            <span class="import-summary-count">${result.seededSkipped}</span>
-            <span class="import-summary-label">seeded ${result.seededSkipped === 1 ? 'activity' : 'activities'}</span>
-            <span class="import-summary-note">(skipped)</span>
-          </li>
-        ` : ''}
-      </ul>
-    </div>
+    <p class="import-success-title">Reset complete!</p>
+    <p class="reset-success-hint">
+      Your app has been restored to its initial state with default activities and a sample routine.
+    </p>
     
     <div class="editor-actions">
-      <button type="button" class="btn btn-primary" id="success-done-btn">Done</button>
+      <button type="button" class="btn btn-primary" id="reset-success-done">Done</button>
     </div>
   `;
   
   const modal = openModal({
     title: 'Success',
     content,
-    dismissable: false,  // require explicit Done click so user sees the summary
+    dismissable: false,
   });
   
-  content.querySelector('#success-done-btn').addEventListener('click', () => {
+  content.querySelector('#reset-success-done').addEventListener('click', () => {
     closeModal(modal);
-    // Navigate to home to refresh all views
     setTimeout(() => {
       router.navigate('/');
     }, 200);
   });
 }
 
+
 // style
-/* === Import Loading + Success === */
+/* === Reset All Data Modals === */
 
-.import-loading {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 20px;
-}
-
-.import-loading-text {
-  margin: 0;
-  font-size: 15px;
-  color: var(--text);
-  text-align: center;
-}
-
-.import-success {
+.reset-warning {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-.import-success-icon {
+.reset-warning-icon {
   font-size: 48px;
   text-align: center;
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
-.import-success-title {
+.reset-warning-title {
   margin: 0;
   font-size: 17px;
   font-weight: 600;
+  color: #ff3b30;
+  text-align: center;
+}
+
+@media (prefers-color-scheme: dark) {
+  .reset-warning-title {
+    color: #ff453a;
+  }
+}
+
+.reset-warning-list {
+  background-color: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  padding: 14px 16px;
+}
+
+.reset-warning-list p {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.reset-warning-list p:last-child {
+  margin-bottom: 0;
+}
+
+.reset-warning-list ul {
+  margin: 0 0 12px 0;
+  padding-left: 24px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.reset-warning-note {
+  font-size: 13px !important;
+  color: var(--text-muted) !important;
+  margin-top: 10px !important;
+}
+
+.reset-warning-note strong {
+  color: #ff3b30;
+}
+
+@media (prefers-color-scheme: dark) {
+  .reset-warning-note strong {
+    color: #ff453a;
+  }
+}
+
+.reset-warning-backup {
+  background-color: rgba(52, 199, 89, 0.08);
+  border: 1px solid rgba(52, 199, 89, 0.25);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .reset-warning-backup {
+    background-color: rgba(48, 209, 88, 0.12);
+    border-color: rgba(48, 209, 88, 0.3);
+  }
+}
+
+.reset-warning-backup-title {
+  margin: 0 0 4px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.reset-warning-backup-hint {
+  margin: 0 0 10px 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.reset-export-btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.reset-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.reset-actions .btn {
+  flex: 1;
+}
+
+/* Danger button variant */
+.btn-danger {
+  background-color: #ff3b30;
+  color: white;
+  border: 1px solid #ff3b30;
+}
+
+.btn-danger:hover {
+  background-color: #e0322a;
+  border-color: #e0322a;
+}
+
+@media (prefers-color-scheme: dark) {
+  .btn-danger {
+    background-color: #ff453a;
+    border-color: #ff453a;
+  }
+  
+  .btn-danger:hover {
+    background-color: #d83a30;
+    border-color: #d83a30;
+  }
+}
+
+.btn-danger:disabled,
+.btn-danger.btn-disabled {
+  background-color: rgba(255, 59, 48, 0.4);
+  border-color: rgba(255, 59, 48, 0.4);
+  color: rgba(255, 255, 255, 0.7);
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .btn-danger:disabled,
+  .btn-danger.btn-disabled {
+    background-color: rgba(255, 69, 58, 0.35);
+    border-color: rgba(255, 69, 58, 0.35);
+  }
+}
+
+/* Reset confirmation modal */
+.reset-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.reset-confirm-intro {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+  text-align: center;
+}
+
+.reset-confirm-intro strong {
+  color: #ff3b30;
+  font-family: 'SF Mono', Monaco, monospace;
+  letter-spacing: 0.05em;
+}
+
+@media (prefers-color-scheme: dark) {
+  .reset-confirm-intro strong {
+    color: #ff453a;
+  }
+}
+
+.reset-confirm-input {
+  width: 100%;
+  padding: 12px 14px;
+  font-family: 'SF Mono', Monaco, monospace;
+  font-size: 18px;
+  letter-spacing: 0.1em;
   text-align: center;
   color: var(--text);
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color 0.15s ease;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.reset-confirm-input:focus {
+  border-color: #ff3b30;
+  box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.15);
+}
+
+@media (prefers-color-scheme: dark) {
+  .reset-confirm-input:focus {
+    border-color: #ff453a;
+    box-shadow: 0 0 0 3px rgba(255, 69, 58, 0.2);
+  }
+}
+
+/* Reset success */
+.reset-success-hint {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.5;
 }
