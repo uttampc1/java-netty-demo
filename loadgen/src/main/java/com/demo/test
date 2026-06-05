@@ -1,191 +1,118 @@
-// src/components/dialog.js
-/**
- * HoldOn — Branded Dialog Helpers
- * 
- * Promise-based replacements for native confirm() and alert().
- * Match the app's modal design language (dark mode, mobile slide-up, etc.).
- * 
- * Usage:
- *   const ok = await confirmModal({ title: 'Delete?', message: 'Are you sure?' });
- *   if (ok) { ... }
- *   
- *   await alertModal({ title: 'Error', message: 'Something went wrong.' });
- */
-
-import { openModal, closeModal } from './modal.js';
-
-/**
- * Shows a confirmation dialog. Returns a Promise that resolves to true/false.
- * 
- * @param {Object} options
- * @param {string} options.title         - Modal title
- * @param {string} options.message       - Body message (supports basic line breaks via \n)
- * @param {string} [options.confirmLabel='Confirm'] - Label for the confirm button
- * @param {string} [options.cancelLabel='Cancel']   - Label for the cancel button
- * @param {boolean} [options.danger=false]          - If true, confirm button is red
- * @returns {Promise<boolean>}
- */
-export function confirmModal({
-  title,
-  message,
-  confirmLabel = 'Confirm',
-  cancelLabel = 'Cancel',
-  danger = false,
-}) {
-  return new Promise((resolve) => {
-    const content = document.createElement('div');
-    content.className = 'dialog-content';
-    content.innerHTML = `
-      <p class="dialog-message">${formatMessage(message)}</p>
-      
-      <div class="dialog-actions">
-        <button type="button" class="btn btn-secondary" id="dialog-cancel-btn">
-          ${escapeHtml(cancelLabel)}
-        </button>
-        <button type="button" class="btn ${danger ? 'btn-danger' : 'btn-primary'}" id="dialog-confirm-btn">
-          ${escapeHtml(confirmLabel)}
-        </button>
+// src/views/routineEdit.js
+   const exercisesHtml = draft.exercises.map((ex, idx) => `
+      <div class="exercise-row" data-exercise-id="${escapeHtml(ex.id)}">
+        <div class="exercise-drag-handle" aria-label="Drag to reorder">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
+            <line x1="4" y1="8" x2="20" y2="8"/>
+            <line x1="4" y1="16" x2="20" y2="16"/>
+          </svg>
+        </div>
+        <div class="exercise-row-main">
+          <div class="exercise-row-content">
+            <div class="exercise-row-name">${escapeHtml(ex.name)}</div>
+            <div class="exercise-row-meta">
+              ${ex.workDuration}s × ${ex.sets} set${ex.sets === 1 ? '' : 's'}${ex.sets > 1 && ex.restBetweenSets > 0 ? ` · ${ex.restBetweenSets}s rest` : ''}
+            </div>
+          </div>
+        </div>
+        <div class="exercise-row-actions">
+          <button type="button" class="btn-icon-only" data-action="edit-exercise" data-exercise-id="${escapeHtml(ex.id)}" aria-label="Edit">
+            ✎
+          </button>
+          <button type="button" class="btn-icon-only btn-icon-danger" data-action="remove-exercise" data-exercise-id="${escapeHtml(ex.id)}" aria-label="Remove">
+            ✕
+          </button>
+        </div>
       </div>
-    `;
-    
-    const modal = openModal({
-      title,
-      content,
-    });
-    
-    let resolved = false;
-    const finish = (result) => {
-      if (resolved) return;
-      resolved = true;
-      closeModal(modal);
-      resolve(result);
-    };
-    
-    content.querySelector('#dialog-cancel-btn').addEventListener('click', () => finish(false));
-    content.querySelector('#dialog-confirm-btn').addEventListener('click', () => finish(true));
-    
-    // If user dismisses via backdrop click or Escape, treat as cancel
-    const originalOnClose = modal.onClose;
-    modal.onClose = () => {
-      if (originalOnClose) originalOnClose();
-      if (!resolved) {
-        resolved = true;
-        resolve(false);
-      }
-    };
-    
-    // Auto-focus the cancel button by default (safer for destructive actions)
-    setTimeout(() => {
-      content.querySelector('#dialog-cancel-btn').focus();
-    }, 100);
-  });
+    `).join('');
+
+// add just before ...
+    // Enable drag-to-reorder
+    const listEl = container.querySelector('#exercise-list');
+    if (listEl && draft.exercises.length > 1) {
+      Sortable.create(listEl, {
+        handle: '.exercise-drag-handle',
+        animation: 150,
+        ghostClass: 'exercise-row-ghost',
+        chosenClass: 'exercise-row-chosen',
+        dragClass: 'exercise-row-drag',
+        forceFallback: true,  // consistent behavior across browsers (especially iOS)
+        fallbackTolerance: 5,
+        onEnd: (evt) => {
+          // Reorder the draft.exercises array to match the new DOM order
+          if (evt.oldIndex === evt.newIndex) return;
+          
+          const [moved] = draft.exercises.splice(evt.oldIndex, 1);
+          draft.exercises.splice(evt.newIndex, 0, moved);
+          
+          console.log('[Reorder] Moved from', evt.oldIndex, 'to', evt.newIndex);
+        },
+      });
+    }
+  }
+
+/* === Step 1.4.G.3 — Drag-to-Reorder === */
+
+.exercise-row {
+  position: relative;
+  /* existing styles preserved */
 }
 
-/**
- * Shows a simple alert dialog. Returns a Promise that resolves when dismissed.
- * 
- * @param {Object} options
- * @param {string} options.title         - Modal title
- * @param {string} options.message       - Body message (supports basic line breaks via \n)
- * @param {string} [options.buttonLabel='OK'] - Label for the dismiss button
- * @returns {Promise<void>}
- */
-export function alertModal({
-  title,
-  message,
-  buttonLabel = 'OK',
-}) {
-  return new Promise((resolve) => {
-    const content = document.createElement('div');
-    content.className = 'dialog-content';
-    content.innerHTML = `
-      <p class="dialog-message">${formatMessage(message)}</p>
-      
-      <div class="dialog-actions dialog-actions-single">
-        <button type="button" class="btn btn-primary" id="dialog-ok-btn">
-          ${escapeHtml(buttonLabel)}
-        </button>
-      </div>
-    `;
-    
-    const modal = openModal({
-      title,
-      content,
-    });
-    
-    let resolved = false;
-    const finish = () => {
-      if (resolved) return;
-      resolved = true;
-      closeModal(modal);
-      resolve();
-    };
-    
-    content.querySelector('#dialog-ok-btn').addEventListener('click', finish);
-    
-    // If user dismisses via backdrop click or Escape, resolve normally
-    const originalOnClose = modal.onClose;
-    modal.onClose = () => {
-      if (originalOnClose) originalOnClose();
-      if (!resolved) {
-        resolved = true;
-        resolve();
-      }
-    };
-    
-    setTimeout(() => {
-      content.querySelector('#dialog-ok-btn').focus();
-    }, 100);
-  });
-}
-
-function formatMessage(message) {
-  if (message == null) return '';
-  return escapeHtml(String(message)).replace(/\n/g, '<br>');
-}
-
-function escapeHtml(str) {
-  if (str == null) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-// style
-/* === Step 1.4.G.1 — Branded Dialogs (confirm/alert helpers) === */
-
-.dialog-content {
+.exercise-drag-handle {
   display: flex;
-  flex-direction: column;
-  gap: 16px;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  cursor: grab;
+  touch-action: none;  /* prevents touch scroll interference */
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: color 0.15s ease;
 }
 
-.dialog-message {
-  margin: 0;
-  font-size: 15px;
-  line-height: 1.5;
+.exercise-drag-handle:hover {
   color: var(--text);
-  word-wrap: break-word;
 }
 
-.dialog-actions {
+.exercise-drag-handle:active {
+  cursor: grabbing;
+}
+
+/* While dragging — the original spot (shown as a "ghost") */
+.exercise-row-ghost {
+  opacity: 0.3;
+  background-color: var(--bg-elevated);
+}
+
+/* The row that's currently being dragged */
+.exercise-row-chosen {
+  /* SortableJS adds this when drag starts but before move */
+}
+
+/* The floating clone that follows the pointer */
+.exercise-row-drag {
+  opacity: 0.95;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  transform: scale(1.02);
+  background-color: var(--bg);
+  border-radius: var(--radius-sm);
+}
+
+@media (prefers-color-scheme: dark) {
+  .exercise-row-drag {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    background-color: var(--bg-elevated);
+  }
+}
+
+/* Ensure the exercise row layout includes the handle */
+.exercise-row {
   display: flex;
-  gap: 10px;
+  align-items: center;
+  /* preserve any existing properties */
 }
 
-.dialog-actions .btn {
-  flex: 1;
-}
 
-/* For alert (single OK button), don't stretch full width on desktop */
-.dialog-actions-single {
-  justify-content: flex-end;
-}
-
-.dialog-actions-single .btn {
-  flex: 0 1 auto;
-  min-width: 100px;
-}
