@@ -1,439 +1,329 @@
-//  src/views/player.js
+// src/core/sessionEngine.js
 /**
- * HoldOn — Session Player (Workout Runner)
+ * HoldOn — Session Engine
  * 
- * Full-screen view that guides user through a workout routine.
- * Step 2.1: Static skeleton. Timer engine and cues come in 2.2+.
+ * Drift-resistant timer + state machine for running a workout routine.
+ * Emits events that the UI subscribes to.
  * 
- * Route: #/play/:routineId
+ * Phases:
+ *   - 'idle'         : not started
+ *   - 'prep'         : 3-second countdown before workout
+ *   - 'work'         : active exercise (countdown)
+ *   - 'rest-set'     : rest between sets of same exercise
+ *   - 'rest-exercise': rest between different exercises
+ *   - 'complete'     : workout finished
+ * 
+ * Events:
+ *   - 'tick'        : { timeRemaining, totalElapsed, state }
+ *   - 'phaseChange' : { from, to, state }
+ *   - 'complete'    : { state, totalElapsed }
+ * 
+ * Usage:
+ *   const engine = new SessionEngine(routine, { prepDuration: 3 });
+ *   engine.on('tick', (data) => { ... });
+ *   engine.on('phaseChange', (data) => { ... });
+ *   engine.on('complete', (data) => { ... });
+ *   engine.start();
  */
 
-import { getRoutine } from '../db/store.js';
-import { router } from '../utils/router.js';
-import { confirmModal, alertModal } from '../components/dialog.js';
+const TICK_INTERVAL_MS = 100;  // 10 updates per second — smooth display
+const DEFAULT_PREP_DURATION = 3;
 
-export async function renderPlayer(container, routineId) {
-  let routine;
-  try {
-    routine = await getRoutine(routineId);
-  } catch (err) {
-    console.error('[Player] Failed to load routine:', err);
-    await alertModal({
-      title: 'Could not load routine',
-      message: err.message || 'The routine could not be found.',
-    });
-    router.navigate('/');
-    return;
-  }
-  
-  if (!routine) {
-    await alertModal({
-      title: 'Routine not found',
-      message: 'This routine no longer exists.',
-    });
-    router.navigate('/');
-    return;
-  }
-  
-  if (!routine.exercises || routine.exercises.length === 0) {
-    await alertModal({
-      title: 'No exercises',
-      message: 'This routine has no exercises. Add some first!',
-    });
-    router.navigate(`/routine/${routineId}`);
-    return;
-  }
-  
-  // Initial display state (static for Step 2.1 — driven by timer engine in 2.3)
-  const initialState = {
-    routine,
-    currentExerciseIndex: 0,
-    currentSet: 1,
-    phase: 'prep',  // 'prep' | 'work' | 'rest-set' | 'rest-exercise' | 'complete'
-    timeRemaining: 3,  // seconds — will be dynamic in 2.2
-  };
-  
-  renderPlayerUI(container, initialState);
-}
-
-function renderPlayerUI(container, state) {
-  const { routine, currentExerciseIndex, currentSet, phase, timeRemaining } = state;
-  const currentExercise = routine.exercises[currentExerciseIndex];
-  
-  const phaseInfo = getPhaseInfo(phase);
-  const nextUp = getNextUpLabel(state);
-  
-  container.innerHTML = `
-    <div class="player" data-phase="${phase}">
-      <div class="player-top">
-        <div class="player-routine-title">${escapeHtml(routine.title)}</div>
-      </div>
-      
-      <div class="player-main">
-        <div class="player-exercise-name">${escapeHtml(currentExercise.name)}</div>
-        
-        ${currentExercise.sets > 1 ? `
-          <div class="player-set-counter">Set ${currentSet} of ${currentExercise.sets}</div>
-        ` : ''}
-        
-        <div class="player-phase-label">
-          <span class="player-phase-dot"></span>
-          ${escapeHtml(phaseInfo.label)}
-        </div>
-        
-        <div class="player-timer" id="player-timer">${formatTime(timeRemaining)}</div>
-        
-        ${nextUp ? `
-          <div class="player-next">${escapeHtml(nextUp)}</div>
-        ` : ''}
-      </div>
-      
-      <div class="player-controls">
-        <button type="button" class="player-control-btn player-pause-btn" id="player-pause-btn">
-          <span class="player-control-icon">⏸</span>
-          <span class="player-control-label">Pause</span>
-        </button>
-        <button type="button" class="player-control-btn player-skip-btn" id="player-skip-btn">
-          <span class="player-control-icon">⏭</span>
-          <span class="player-control-label">Skip</span>
-        </button>
-        <button type="button" class="player-control-btn player-exit-btn" id="player-exit-btn">
-          <span class="player-control-icon">✕</span>
-          <span class="player-control-label">Exit</span>
-        </button>
-      </div>
-    </div>
-  `;
-  
-  wirePlayerControls(container, state);
-}
-
-function wirePlayerControls(container, state) {
-  const pauseBtn = container.querySelector('#player-pause-btn');
-  const skipBtn = container.querySelector('#player-skip-btn');
-  const exitBtn = container.querySelector('#player-exit-btn');
-  
-  pauseBtn.addEventListener('click', async () => {
-    // Placeholder for Step 2.5
-    await alertModal({
-      title: 'Pause',
-      message: 'Pause/resume coming in Step 2.5.',
-    });
-  });
-  
-  skipBtn.addEventListener('click', async () => {
-    // Placeholder for Step 2.5
-    await alertModal({
-      title: 'Skip',
-      message: 'Skip control coming in Step 2.5.',
-    });
-  });
-  
-  exitBtn.addEventListener('click', async () => {
-    const confirmed = await confirmModal({
-      title: 'Exit workout?',
-      message: 'Your progress will not be saved.',
-      confirmLabel: 'Exit',
-      cancelLabel: 'Keep going',
-      danger: true,
-    });
-    if (confirmed) {
-      router.navigate(`/routine/${state.routine.id}`);
+export class SessionEngine {
+  constructor(routine, options = {}) {
+    if (!routine || !Array.isArray(routine.exercises) || routine.exercises.length === 0) {
+      throw new Error('SessionEngine requires a routine with at least one exercise');
     }
-  });
-}
-
-// ============================================================
-// HELPERS
-// ============================================================
-
-function getPhaseInfo(phase) {
-  const phaseMap = {
-    'prep':         { label: 'Get Ready', color: 'amber' },
-    'work':         { label: 'Work',      color: 'blue' },
-    'rest-set':     { label: 'Rest',      color: 'green' },
-    'rest-exercise':{ label: 'Rest',      color: 'green' },
-    'complete':     { label: 'Complete!', color: 'gold' },
-  };
-  return phaseMap[phase] || { label: phase, color: 'gray' };
-}
-
-function getNextUpLabel(state) {
-  const { routine, currentExerciseIndex, currentSet, phase } = state;
-  const currentExercise = routine.exercises[currentExerciseIndex];
-  
-  if (phase === 'prep') {
-    return `Next: Work (${currentExercise.workDuration}s)`;
+    
+    this.routine = routine;
+    this.prepDuration = options.prepDuration ?? DEFAULT_PREP_DURATION;
+    
+    // State
+    this.phase = 'idle';
+    this.currentExerciseIndex = 0;
+    this.currentSet = 1;
+    this.timeRemaining = 0;       // seconds remaining in current phase
+    this.phaseDuration = 0;       // total seconds for current phase
+    this.totalElapsed = 0;        // total seconds elapsed since start
+    
+    // Tick mechanics
+    this._tickHandle = null;
+    this._phaseStartTime = null;  // performance.now() when phase began
+    this._pausedAt = null;        // performance.now() when paused, null if running
+    this._sessionStartTime = null;
+    this._totalPausedDuration = 0;
+    
+    // Event listeners
+    this._listeners = {
+      tick: [],
+      phaseChange: [],
+      complete: [],
+    };
   }
   
-  if (phase === 'work') {
-    // Is there another set of this exercise?
-    if (currentSet < currentExercise.sets) {
-      return currentExercise.restBetweenSets > 0
-        ? `Next: Rest (${currentExercise.restBetweenSets}s)`
-        : `Next: Set ${currentSet + 1}`;
-    }
-    // Last set of this exercise — is there a next exercise?
-    if (currentExerciseIndex < routine.exercises.length - 1) {
-      const nextEx = routine.exercises[currentExerciseIndex + 1];
-      return routine.restBetweenExercises > 0
-        ? `Next: Rest (${routine.restBetweenExercises}s) → ${nextEx.name}`
-        : `Next: ${nextEx.name}`;
-    }
-    return 'Last set!';
-  }
+  // ============================================================
+  // PUBLIC API
+  // ============================================================
   
-  if (phase === 'rest-set') {
-    return `Next: Set ${currentSet + 1} of ${currentExercise.sets}`;
-  }
-  
-  if (phase === 'rest-exercise') {
-    const nextEx = routine.exercises[currentExerciseIndex + 1];
-    return nextEx ? `Next: ${nextEx.name}` : '';
-  }
-  
-  return '';
-}
-
-function formatTime(seconds) {
-  if (seconds == null || seconds < 0) return '00:00';
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-}
-
-function escapeHtml(str) {
-  if (str == null) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-// src/views/routineDetail.js   
-container.querySelector('#start-btn').addEventListener('click', () => {
-    if (!routine.exercises || routine.exercises.length === 0) {
-      alertModal({
-        title: 'No exercises',
-        message: 'Add at least one exercise before starting.',
-      });
+  /**
+   * Start the workout (transitions from 'idle' to 'prep').
+   */
+  start() {
+    if (this.phase !== 'idle') {
+      console.warn('[SessionEngine] start() called but phase is not idle:', this.phase);
       return;
     }
-    router.navigate(`/play/${routine.id}`);
-  });
-
-// Styles
-/* === Phase 2 / Step 2.1 — Session Player === */
-
-.player {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  background-color: var(--bg);
-  color: var(--text);
-  z-index: 1000;
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
-  overflow: hidden;
-}
-
-/* Top: routine title */
-.player-top {
-  flex-shrink: 0;
-  padding: 20px 20px 0;
-  text-align: center;
-}
-
-.player-routine-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-/* Main: exercise + timer */
-.player-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 20px;
-  min-height: 0;
-  text-align: center;
-}
-
-.player-exercise-name {
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--text);
-  line-height: 1.2;
-  max-width: 100%;
-  word-wrap: break-word;
-}
-
-.player-set-counter {
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.player-phase-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 14px;
-  border-radius: 16px;
-  background-color: var(--bg-elevated);
-  font-size: 13px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text);
-  margin-top: 4px;
-}
-
-.player-phase-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background-color: var(--text-muted);
-  display: inline-block;
-}
-
-/* Phase-specific colors */
-.player[data-phase="prep"] .player-phase-dot {
-  background-color: #ff9500;
-  animation: pulse 1.2s ease-in-out infinite;
-}
-.player[data-phase="work"] .player-phase-dot {
-  background-color: #007aff;
-  animation: pulse 1.2s ease-in-out infinite;
-}
-.player[data-phase="rest-set"] .player-phase-dot,
-.player[data-phase="rest-exercise"] .player-phase-dot {
-  background-color: #34c759;
-}
-.player[data-phase="complete"] .player-phase-dot {
-  background-color: #ffd700;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(0.85); }
-}
-
-/* The big timer display */
-.player-timer {
-  font-size: 96px;
-  font-weight: 200;
-  line-height: 1;
-  letter-spacing: -0.04em;
-  font-variant-numeric: tabular-nums;
-  color: var(--text);
-  margin: 12px 0;
-  font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-}
-
-/* Larger timer on bigger screens */
-@media (min-height: 700px) {
-  .player-timer {
-    font-size: 128px;
+    
+    this._sessionStartTime = performance.now();
+    this._transitionTo('prep', this.prepDuration);
+    this._startTicking();
+  }
+  
+  /**
+   * Pause the timer (freezes remaining time).
+   */
+  pause() {
+    if (this._pausedAt !== null) return;  // already paused
+    if (this.phase === 'idle' || this.phase === 'complete') return;
+    
+    this._pausedAt = performance.now();
+    this._stopTicking();
+  }
+  
+  /**
+   * Resume from pause.
+   */
+  resume() {
+    if (this._pausedAt === null) return;  // not paused
+    
+    // Adjust phase start time so timeRemaining stays correct
+    const pauseDuration = performance.now() - this._pausedAt;
+    this._phaseStartTime += pauseDuration;
+    this._totalPausedDuration += pauseDuration;
+    this._pausedAt = null;
+    
+    this._startTicking();
+  }
+  
+  /**
+   * Skip to the next phase immediately.
+   */
+  skip() {
+    if (this.phase === 'idle' || this.phase === 'complete') return;
+    this._advancePhase();
+  }
+  
+  /**
+   * Stop the workout entirely (transitions to 'idle' or 'complete' depending on context).
+   * Use this for "exit" — does not auto-advance.
+   */
+  stop() {
+    this._stopTicking();
+    this.phase = 'idle';
+    this._pausedAt = null;
+  }
+  
+  /**
+   * Returns true if currently paused.
+   */
+  isPaused() {
+    return this._pausedAt !== null;
+  }
+  
+  /**
+   * Returns true if engine is in an active phase (not idle/complete).
+   */
+  isActive() {
+    return this.phase !== 'idle' && this.phase !== 'complete';
+  }
+  
+  /**
+   * Returns a snapshot of the current state (for UI rendering).
+   */
+  getState() {
+    return {
+      phase: this.phase,
+      currentExerciseIndex: this.currentExerciseIndex,
+      currentExercise: this.routine.exercises[this.currentExerciseIndex] || null,
+      currentSet: this.currentSet,
+      timeRemaining: Math.max(0, Math.ceil(this.timeRemaining)),
+      phaseDuration: this.phaseDuration,
+      totalElapsed: Math.floor(this.totalElapsed),
+      isPaused: this.isPaused(),
+      totalExercises: this.routine.exercises.length,
+    };
+  }
+  
+  // ============================================================
+  // EVENT SUBSCRIPTION
+  // ============================================================
+  
+  on(event, callback) {
+    if (this._listeners[event]) {
+      this._listeners[event].push(callback);
+    }
+    // Return an unsubscribe function
+    return () => this.off(event, callback);
+  }
+  
+  off(event, callback) {
+    if (this._listeners[event]) {
+      this._listeners[event] = this._listeners[event].filter((cb) => cb !== callback);
+    }
+  }
+  
+  _emit(event, data) {
+    if (this._listeners[event]) {
+      this._listeners[event].forEach((cb) => {
+        try {
+          cb(data);
+        } catch (err) {
+          console.error(`[SessionEngine] Listener for "${event}" threw:`, err);
+        }
+      });
+    }
+  }
+  
+  // ============================================================
+  // INTERNAL: TICK LOOP
+  // ============================================================
+  
+  _startTicking() {
+    if (this._tickHandle !== null) return;
+    this._tickHandle = setInterval(() => this._tick(), TICK_INTERVAL_MS);
+  }
+  
+  _stopTicking() {
+    if (this._tickHandle !== null) {
+      clearInterval(this._tickHandle);
+      this._tickHandle = null;
+    }
+  }
+  
+  _tick() {
+    if (this._pausedAt !== null) return;  // safety: shouldn't happen but just in case
+    
+    const now = performance.now();
+    const elapsedInPhase = (now - this._phaseStartTime) / 1000;  // seconds
+    this.timeRemaining = this.phaseDuration - elapsedInPhase;
+    this.totalElapsed = (now - this._sessionStartTime - this._totalPausedDuration) / 1000;
+    
+    this._emit('tick', this.getState());
+    
+    if (this.timeRemaining <= 0) {
+      this._advancePhase();
+    }
+  }
+  
+  // ============================================================
+  // INTERNAL: PHASE TRANSITIONS
+  // ============================================================
+  
+  _advancePhase() {
+    const currentExercise = this.routine.exercises[this.currentExerciseIndex];
+    if (!currentExercise) {
+      this._complete();
+      return;
+    }
+    
+    if (this.phase === 'prep') {
+      // Prep → Work (first exercise, first set)
+      this._transitionTo('work', currentExercise.workDuration);
+      return;
+    }
+    
+    if (this.phase === 'work') {
+      // Work done — what's next?
+      const isLastSet = this.currentSet >= currentExercise.sets;
+      const isLastExercise = this.currentExerciseIndex >= this.routine.exercises.length - 1;
+      
+      if (!isLastSet) {
+        // More sets of this exercise
+        if (currentExercise.restBetweenSets > 0) {
+          this._transitionTo('rest-set', currentExercise.restBetweenSets);
+        } else {
+          // No rest configured — go straight to next set
+          this.currentSet++;
+          this._transitionTo('work', currentExercise.workDuration);
+        }
+        return;
+      }
+      
+      // Last set of this exercise — is there a next exercise?
+      if (!isLastExercise) {
+        if (this.routine.restBetweenExercises > 0) {
+          this._transitionTo('rest-exercise', this.routine.restBetweenExercises);
+        } else {
+          // No rest configured — go straight to next exercise
+          this.currentExerciseIndex++;
+          this.currentSet = 1;
+          const nextEx = this.routine.exercises[this.currentExerciseIndex];
+          this._transitionTo('work', nextEx.workDuration);
+        }
+        return;
+      }
+      
+      // Last set of last exercise — DONE!
+      this._complete();
+      return;
+    }
+    
+    if (this.phase === 'rest-set') {
+      // Rest done — move to next set of same exercise
+      this.currentSet++;
+      this._transitionTo('work', currentExercise.workDuration);
+      return;
+    }
+    
+    if (this.phase === 'rest-exercise') {
+      // Rest done — move to next exercise, set 1
+      this.currentExerciseIndex++;
+      this.currentSet = 1;
+      const nextEx = this.routine.exercises[this.currentExerciseIndex];
+      if (!nextEx) {
+        this._complete();
+        return;
+      }
+      this._transitionTo('work', nextEx.workDuration);
+      return;
+    }
+  }
+  
+  _transitionTo(newPhase, duration) {
+    const fromPhase = this.phase;
+    this.phase = newPhase;
+    this.phaseDuration = duration;
+    this.timeRemaining = duration;
+    this._phaseStartTime = performance.now();
+    
+    this._emit('phaseChange', {
+      from: fromPhase,
+      to: newPhase,
+      state: this.getState(),
+    });
+    
+    console.log(`[SessionEngine] ${fromPhase} → ${newPhase} (${duration}s)`);
+  }
+  
+  _complete() {
+    this._stopTicking();
+    const fromPhase = this.phase;
+    this.phase = 'complete';
+    this.timeRemaining = 0;
+    
+    this._emit('phaseChange', {
+      from: fromPhase,
+      to: 'complete',
+      state: this.getState(),
+    });
+    
+    this._emit('complete', {
+      state: this.getState(),
+      totalElapsed: Math.floor(this.totalElapsed),
+    });
+    
+    console.log(`[SessionEngine] Workout complete! Total: ${Math.floor(this.totalElapsed)}s`);
   }
 }
 
-@media (min-height: 900px) {
-  .player-timer {
-    font-size: 160px;
-  }
-}
-
-.player-next {
-  font-size: 14px;
-  color: var(--text-muted);
-  margin-top: 8px;
-  max-width: 100%;
-  word-wrap: break-word;
-}
-
-/* Controls at bottom */
-.player-controls {
-  flex-shrink: 0;
-  display: flex;
-  gap: 8px;
-  padding: 16px 20px 24px;
-  justify-content: space-around;
-}
-
-.player-control-btn {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  background: none;
-  border: none;
-  padding: 12px 8px;
-  border-radius: var(--radius);
-  color: var(--text);
-  cursor: pointer;
-  font-family: inherit;
-  transition: background-color 0.15s ease, transform 0.05s ease;
-  -webkit-tap-highlight-color: transparent;
-  min-height: 64px;
-}
-
-.player-control-btn:hover {
-  background-color: var(--bg-elevated);
-}
-
-.player-control-btn:active {
-  transform: scale(0.96);
-  background-color: rgba(0, 0, 0, 0.08);
-}
-
-@media (prefers-color-scheme: dark) {
-  .player-control-btn:active {
-    background-color: rgba(255, 255, 255, 0.1);
-  }
-}
-
-.player-control-icon {
-  font-size: 22px;
-  line-height: 1;
-}
-
-.player-control-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-muted);
-}
-
-.player-exit-btn .player-control-icon,
-.player-exit-btn .player-control-label {
-  color: #ff3b30;
-}
-
-@media (prefers-color-scheme: dark) {
-  .player-exit-btn .player-control-icon,
-  .player-exit-btn .player-control-label {
-    color: #ff453a;
-  }
-}
-
-/* Subtle background tinting for active phases (very subtle) */
-.player[data-phase="work"] {
-  background-color: var(--bg);
-}
-
-.player[data-phase="rest-set"],
-.player[data-phase="rest-exercise"] {
-  background-color: var(--bg);
-}
+// 
