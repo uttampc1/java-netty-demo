@@ -1,134 +1,225 @@
-// src/views/dataSection.js
+// src/db/importValidation.js
+/**
+ * HoldOn — Import Validation
+ * 
+ * Validates that a parsed JSON object is a valid HoldOn backup.
+ * Returns either { valid: true, data, summary } or { valid: false, error }.
+ */
 
-function showIOSExportFallback(jsonString, filename) {
+/**
+ * Validate a parsed backup object.
+ * @param {*} data - Parsed JSON
+ * @returns {Object} { valid, data, summary, error }
+ */
+export function validateBackup(data) {
+  // Must be an object
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return {
+      valid: false,
+      error: 'File is not a valid backup (expected an object at the top level).',
+    };
+  }
+  
+  // Must have a version field
+  if (typeof data.version !== 'number') {
+    return {
+      valid: false,
+      error: 'File is missing the "version" field. This may not be a HoldOn backup.',
+    };
+  }
+  
+  // Must have routines array
+  if (!Array.isArray(data.routines)) {
+    return {
+      valid: false,
+      error: 'File is missing the "routines" array.',
+    };
+  }
+  
+  // Must have activities array
+  if (!Array.isArray(data.activities)) {
+    return {
+      valid: false,
+      error: 'File is missing the "activities" array.',
+    };
+  }
+  
+  // Sessions array is optional (older backups may not have it)
+  const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+  
+  // Count seeded vs custom activities for the summary
+  const seededActivities = data.activities.filter((a) => a && a.isSeeded === true);
+  const customActivities = data.activities.filter((a) => a && a.isSeeded !== true);
+  
+  // Basic sanity check on routines (must have id and title at minimum)
+  const invalidRoutine = data.routines.find((r) => !r || !r.id || typeof r.title !== 'string');
+  if (invalidRoutine) {
+    return {
+      valid: false,
+      error: 'One or more routines are malformed (missing id or title).',
+    };
+  }
+  
+  // Basic sanity check on activities
+  const invalidActivity = data.activities.find((a) => !a || !a.id || typeof a.name !== 'string');
+  if (invalidActivity) {
+    return {
+      valid: false,
+      error: 'One or more activities are malformed (missing id or name).',
+    };
+  }
+  
+  return {
+    valid: true,
+    data: {
+      ...data,
+      sessions,  // ensure sessions is always an array
+    },
+    summary: {
+      version: data.version,
+      routineCount: data.routines.length,
+      customActivityCount: customActivities.length,
+      seededActivityCount: seededActivities.length,
+      sessionCount: sessions.length,
+      exportedAt: data.exportedAt || null,
+    },
+  };
+}
+
+/**
+ * Parse a JSON string and validate it.
+ * Returns the same shape as validateBackup, plus catches parse errors.
+ */
+export function parseAndValidateBackup(jsonString) {
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonString);
+  } catch (err) {
+    return {
+      valid: false,
+      error: `Invalid JSON: ${err.message}`,
+    };
+  }
+  
+  return validateBackup(parsed);
+}
+
+// in dataSection.js
+
+// ============================================================
+// IMPORT
+// ============================================================
+
+async function handleImportFile(e) {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';  // reset input so same file can be picked again later
+  
+  if (!file) return;
+  
+  try {
+    const jsonString = await readFileAsText(file);
+    processImportData(jsonString);
+  } catch (err) {
+    console.error('[Import] Failed to read file:', err);
+    alert('Failed to read file: ' + err.message);
+  }
+}
+
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('File could not be read.'));
+    reader.readAsText(file);
+  });
+}
+
+/**
+ * Validates JSON, then shows confirmation modal (1.4.F.3.B.2.B).
+ * For 1.4.F.3.B.2.A: just shows an alert with the summary.
+ */
+function processImportData(jsonString) {
+  const result = parseAndValidateBackup(jsonString);
+  
+  if (!result.valid) {
+    alert('Import failed:\n\n' + result.error);
+    return;
+  }
+  
+  // For 1.4.F.3.B.2.A: show summary as alert (confirmation modal in next sub-chunk)
+  const s = result.summary;
+  const exportedDate = s.exportedAt 
+    ? new Date(s.exportedAt).toLocaleDateString()
+    : 'unknown date';
+  
+  const summaryText = 
+    `Valid HoldOn backup (version ${s.version}, exported ${exportedDate})\n\n` +
+    `Contents:\n` +
+    `  • ${s.routineCount} routine${s.routineCount === 1 ? '' : 's'}\n` +
+    `  • ${s.customActivityCount} custom ${s.customActivityCount === 1 ? 'activity' : 'activities'}\n` +
+    `  • ${s.seededActivityCount} seeded ${s.seededActivityCount === 1 ? 'activity' : 'activities'} (will be skipped)\n` +
+    `  • ${s.sessionCount} session${s.sessionCount === 1 ? '' : 's'}\n\n` +
+    `Replace/Merge confirmation modal coming in Step 1.4.F.3.B.2.B.`;
+  
+  alert(summaryText);
+  console.log('[Import] Validated backup:', result.data);
+}
+
+// wireDataSection
+
+function showIOSImportFallback() {
   const content = document.createElement('div');
-  content.className = 'ios-export-fallback';
+  content.className = 'ios-import-fallback';
   content.innerHTML = `
     <p class="muted ios-export-intro">
-      Your browser doesn't support automatic downloads on iOS.
-      Use one of these options to save your backup:
+      Your browser doesn't support file picking on iOS.
+      Paste your backup JSON below to import:
     </p>
     
     <div class="ios-export-option">
-      <h4>Option 1: Copy to Clipboard</h4>
-      <p class="muted">Tap the button to copy. If it fails, use Option 2 below.</p>
-      <button type="button" class="btn btn-primary" id="copy-btn">
-        📋 Copy Backup Data
-      </button>
-    </div>
-    
-    <div class="ios-export-option" id="manual-copy-section" hidden>
-      <h4>Option 2: Copy Manually</h4>
-      <p class="muted">Tap into the box, Select All, then Copy.</p>
+      <h4>Paste backup data</h4>
       <textarea
         class="ios-export-textarea"
-        id="manual-copy-textarea"
-        readonly
-        rows="6"
-      >${escapeHtml(jsonString)}</textarea>
+        id="paste-textarea"
+        placeholder="Paste your HoldOn backup JSON here..."
+        rows="8"
+      ></textarea>
+    </div>
+    
+    <div class="editor-actions">
+      <button type="button" class="btn btn-secondary" id="paste-cancel">Cancel</button>
+      <button type="button" class="btn btn-primary" id="paste-validate" disabled>Validate</button>
     </div>
     
     <div class="ios-export-option">
-      <h4>Option 3: Use Safari</h4>
-      <p class="muted">Open this app in Safari for full download support.</p>
-    </div>
-    
-    <div class="ios-export-option">
-      <h4>Filename suggestion</h4>
-      <p class="ios-export-filename"><code>${escapeHtml(filename)}</code></p>
+      <h4>Alternative: Use Safari</h4>
+      <p class="muted">Open this app in Safari for a standard file picker.</p>
     </div>
   `;
   
   const modal = openModal({
-    title: 'Export Data',
+    title: 'Import Data',
     content,
   });
   
-  const copyBtn = content.querySelector('#copy-btn');
-  const manualSection = content.querySelector('#manual-copy-section');
-  const manualTextarea = content.querySelector('#manual-copy-textarea');
+  const textarea = content.querySelector('#paste-textarea');
+  const validateBtn = content.querySelector('#paste-validate');
+  const cancelBtn = content.querySelector('#paste-cancel');
   
-  copyBtn.addEventListener('click', async () => {
-    let copied = false;
-    
-    // Strategy 1: Modern Clipboard API
-    try {
-      if (typeof navigator !== 'undefined' 
-          && navigator.clipboard 
-          && typeof navigator.clipboard.writeText === 'function') {
-        await navigator.clipboard.writeText(jsonString);
-        copied = true;
-      }
-    } catch (err) {
-      console.warn('[Data] Clipboard API failed:', err);
-    }
-    
-    // Strategy 2: Legacy execCommand fallback
-    if (!copied) {
-      try {
-        const tempTextarea = document.createElement('textarea');
-        tempTextarea.value = jsonString;
-        tempTextarea.style.position = 'fixed';
-        tempTextarea.style.top = '0';
-        tempTextarea.style.left = '0';
-        tempTextarea.style.opacity = '0';
-        document.body.appendChild(tempTextarea);
-        tempTextarea.focus();
-        tempTextarea.select();
-        copied = document.execCommand('copy');
-        document.body.removeChild(tempTextarea);
-      } catch (err) {
-        console.warn('[Data] execCommand fallback failed:', err);
-      }
-    }
-    
-    if (copied) {
-      copyBtn.textContent = '✅ Copied!';
-      copyBtn.disabled = true;
-      setTimeout(() => closeModal(modal), 1500);
-    } else {
-      // Both strategies failed — show manual copy textarea
-      copyBtn.textContent = '⚠️ Use Option 2 below';
-      copyBtn.disabled = true;
-      manualSection.hidden = false;
-      
-      // Auto-select the textarea content for easier manual copy
-      setTimeout(() => {
-        manualTextarea.focus();
-        manualTextarea.select();
-      }, 100);
-    }
+  // Enable validate button when textarea has content
+  textarea.addEventListener('input', () => {
+    validateBtn.disabled = textarea.value.trim().length === 0;
   });
+  
+  cancelBtn.addEventListener('click', () => closeModal(modal));
+  
+  validateBtn.addEventListener('click', () => {
+    const jsonString = textarea.value.trim();
+    if (!jsonString) return;
+    closeModal(modal);
+    setTimeout(() => processImportData(jsonString), 150);
+  });
+  
+  setTimeout(() => textarea.focus(), 100);
 }
 
-// 
-/* === iOS Export — Manual Copy Textarea === */
-
-.ios-export-textarea {
-  width: 100%;
-  padding: 10px 12px;
-  font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Courier New', monospace;
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--text);
-  background-color: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  resize: vertical;
-  min-height: 80px;
-  max-height: 200px;
-  -webkit-appearance: none;
-  appearance: none;
-  outline: none;
-}
-
-.ios-export-textarea:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
-}
-
-@media (prefers-color-scheme: dark) {
-  .ios-export-textarea:focus {
-    box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.25);
-  }
-}
