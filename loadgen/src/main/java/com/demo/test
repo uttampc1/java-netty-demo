@@ -1,434 +1,158 @@
-// src/db/store.js
+// src/views/aboutSection.js
 /**
- * Wipes EVERYTHING — all stores including settings and meta.
- * Used by the Reset feature. Caller is responsible for re-seeding afterward.
+ * HoldOn — About Section (rendered inside Settings)
+ * 
+ * Static informational content. No interactions beyond
+ * a future GitHub link (added post-deploy in Step 1.5).
  */
-export async function wipeAllData() {
-  const db = await getDB();
-  const tx = db.transaction(
-    [STORE_ROUTINES, STORE_ACTIVITIES, STORE_SESSIONS, STORE_META],
-    'readwrite'
-  );
-  
-  await tx.objectStore(STORE_ROUTINES).clear();
-  await tx.objectStore(STORE_ACTIVITIES).clear();
-  await tx.objectStore(STORE_SESSIONS).clear();
-  await tx.objectStore(STORE_META).clear();
-  
-  await tx.done;
-  
-  console.log('[Reset] All data wiped from all stores.');
-}
 
+// __APP_VERSION__ is a build-time constant defined in vite.config.js
+const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';
 
-// src/views/dataSection.js
-// ============================================================
-// RESET
-// ============================================================
+export function renderAboutSection(container) {
+  container.innerHTML = `
+    <div class="about-section">
+      <div class="about-header">
+        <div class="about-name">HoldOn</div>
+        <div class="about-version">Version ${APP_VERSION}</div>
+        <div class="about-tagline">Simple timers for poses, holds &amp; reps.</div>
+      </div>
 
-async function handleReset() {
-  showResetWarning();
-}
+      <div class="settings-divider"></div>
 
-/**
- * Modal 1: Initial warning with option to export first.
- */
-function showResetWarning() {
-  const content = document.createElement('div');
-  content.className = 'reset-warning';
-  content.innerHTML = `
-    <div class="reset-warning-icon">⚠️</div>
-    
-    <p class="reset-warning-title">This will delete everything.</p>
-    
-    <div class="reset-warning-list">
-      <p>You're about to permanently delete:</p>
-      <ul>
-        <li>All routines</li>
-        <li>All custom activities</li>
-        <li>All workout history (sessions)</li>
-        <li>All settings (cue defaults)</li>
-      </ul>
-      <p class="reset-warning-note">
-        Seeded activities will be restored to defaults.
-        <strong>This action cannot be undone.</strong>
-      </p>
-    </div>
-    
-    <div class="reset-warning-backup">
-      <p class="reset-warning-backup-title">💾 Recommended: Back up first</p>
-      <p class="reset-warning-backup-hint">
-        Export your data now so you can restore it later if you change your mind.
-      </p>
-      <button type="button" class="btn btn-secondary reset-export-btn" id="reset-export-btn">
-        📤 Export now
-      </button>
-    </div>
-    
-    <div class="editor-actions reset-actions">
-      <button type="button" class="btn btn-secondary" id="reset-cancel-btn">Cancel</button>
-      <button type="button" class="btn btn-danger" id="reset-continue-btn">Continue to reset</button>
+      <div class="about-block">
+        <div class="about-block-title">🔒 Privacy</div>
+        <p class="about-block-text">
+          Your routines, activities, and workout history stay on your device.
+          No accounts, no cloud sync, no tracking.
+        </p>
+        <p class="about-block-text about-block-subtle">
+          When deployed publicly, anonymous and cookieless usage statistics
+          may help improve the app — no personal data is ever collected.
+        </p>
+      </div>
+
+      <div class="settings-divider"></div>
+
+      <div class="about-block">
+        <div class="about-block-title">⚙️ Built With</div>
+        <ul class="about-tech-list">
+          <li>Vite (build tool)</li>
+          <li>IndexedDB (local storage)</li>
+          <li>Service Workers (offline support)</li>
+          <li>Vanilla JavaScript &amp; CSS</li>
+          <li>❤️ for clean, simple UIs</li>
+        </ul>
+      </div>
+
+      <div class="settings-divider"></div>
+
+      <div class="about-block">
+        <div class="about-block-title">📜 License</div>
+        <p class="about-block-text">
+          MIT License — free to use, modify, and share.
+        </p>
+      </div>
+
+      <div class="settings-divider"></div>
+
+      <div class="about-footer">
+        <p class="about-footer-text">
+          Made with care · <span class="about-footer-version">v${APP_VERSION}</span>
+        </p>
+      </div>
     </div>
   `;
-  
-  const modal = openModal({
-    title: 'Reset All Data',
-    content,
-  });
-  
-  content.querySelector('#reset-cancel-btn').addEventListener('click', () => {
-    closeModal(modal);
-  });
-  
-  content.querySelector('#reset-export-btn').addEventListener('click', () => {
-    // Trigger export without closing this modal — user can come back to it
-    handleExport();
-  });
-  
-  content.querySelector('#reset-continue-btn').addEventListener('click', () => {
-    closeModal(modal);
-    setTimeout(() => showResetConfirm(), 200);
-  });
 }
-
-/**
- * Modal 2: Type DELETE to enable the destructive button.
- */
-function showResetConfirm() {
-  const content = document.createElement('div');
-  content.className = 'reset-confirm';
-  content.innerHTML = `
-    <p class="reset-confirm-intro">
-      Type <strong>DELETE</strong> below to confirm.
-      This is your last chance to cancel.
-    </p>
-    
-    <div class="form-group">
-      <input
-        type="text"
-        id="reset-confirm-input"
-        class="reset-confirm-input"
-        placeholder="Type DELETE"
-        autocomplete="off"
-        autocapitalize="characters"
-        spellcheck="false"
-      />
-    </div>
-    
-    <div class="editor-actions reset-actions">
-      <button type="button" class="btn btn-secondary" id="reset-confirm-cancel">Cancel</button>
-      <button type="button" class="btn btn-danger" id="reset-confirm-delete" disabled>
-        Delete Everything
-      </button>
-    </div>
-  `;
-  
-  const modal = openModal({
-    title: 'Final Confirmation',
-    content,
-    dismissable: false,  // require explicit Cancel — no accidental backdrop dismiss
-  });
-  
-  const input = content.querySelector('#reset-confirm-input');
-  const deleteBtn = content.querySelector('#reset-confirm-delete');
-  const cancelBtn = content.querySelector('#reset-confirm-cancel');
-  
-  input.addEventListener('input', (e) => {
-    const value = e.target.value;
-    if (value === 'DELETE') {
-      deleteBtn.disabled = false;
-      deleteBtn.classList.remove('btn-disabled');
-    } else {
-      deleteBtn.disabled = true;
-      deleteBtn.classList.add('btn-disabled');
-    }
-  });
-  
-  cancelBtn.addEventListener('click', () => closeModal(modal));
-  
-  deleteBtn.addEventListener('click', async () => {
-    closeModal(modal);
-    setTimeout(() => executeReset(), 200);
-  });
-  
-  setTimeout(() => input.focus(), 100);
-}
-
-/**
- * Actually wipe + re-seed, then show success.
- */
-async function executeReset() {
-  const loadingContent = document.createElement('div');
-  loadingContent.className = 'import-loading';
-  loadingContent.innerHTML = `
-    <p class="import-loading-text">Resetting all data...</p>
-  `;
-  const loadingModal = openModal({
-    title: 'Resetting...',
-    content: loadingContent,
-    dismissable: false,
-  });
-  
-  try {
-    await wipeAllData();
-    await seedIfNeeded();  // re-seeds activities + sample routine
-    
-    closeModal(loadingModal);
-    setTimeout(() => showResetSuccess(), 200);
-  } catch (err) {
-    console.error('[Reset] Failed:', err);
-    closeModal(loadingModal);
-    setTimeout(() => {
-      alert('Reset failed:\n\n' + err.message);
-    }, 200);
-  }
-}
-
-function showResetSuccess() {
-  const content = document.createElement('div');
-  content.className = 'import-success';
-  content.innerHTML = `
-    <div class="import-success-icon">✅</div>
-    <p class="import-success-title">Reset complete!</p>
-    <p class="reset-success-hint">
-      Your app has been restored to its initial state with default activities and a sample routine.
-    </p>
-    
-    <div class="editor-actions">
-      <button type="button" class="btn btn-primary" id="reset-success-done">Done</button>
-    </div>
-  `;
-  
-  const modal = openModal({
-    title: 'Success',
-    content,
-    dismissable: false,
-  });
-  
-  content.querySelector('#reset-success-done').addEventListener('click', () => {
-    closeModal(modal);
-    setTimeout(() => {
-      router.navigate('/');
-    }, 200);
-  });
-}
-
 
 // style
-/* === Reset All Data Modals === */
+/* === Step 1.4.F.3.C — About Section === */
 
-.reset-warning {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+.about-section {
+  padding: 4px 0;
 }
 
-.reset-warning-icon {
-  font-size: 48px;
-  text-align: center;
-  margin-top: 4px;
-}
-
-.reset-warning-title {
-  margin: 0;
-  font-size: 17px;
-  font-weight: 600;
-  color: #ff3b30;
+.about-header {
+  padding: 20px 16px 16px;
   text-align: center;
 }
 
-@media (prefers-color-scheme: dark) {
-  .reset-warning-title {
-    color: #ff453a;
-  }
-}
-
-.reset-warning-list {
-  background-color: var(--bg-elevated);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  padding: 14px 16px;
-}
-
-.reset-warning-list p {
-  margin: 0 0 8px 0;
-  font-size: 14px;
-  line-height: 1.5;
+.about-name {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
   color: var(--text);
+  margin-bottom: 4px;
 }
 
-.reset-warning-list p:last-child {
-  margin-bottom: 0;
-}
-
-.reset-warning-list ul {
-  margin: 0 0 12px 0;
-  padding-left: 24px;
-  font-size: 14px;
-  line-height: 1.6;
-  color: var(--text);
-}
-
-.reset-warning-note {
-  font-size: 13px !important;
-  color: var(--text-muted) !important;
-  margin-top: 10px !important;
-}
-
-.reset-warning-note strong {
-  color: #ff3b30;
-}
-
-@media (prefers-color-scheme: dark) {
-  .reset-warning-note strong {
-    color: #ff453a;
-  }
-}
-
-.reset-warning-backup {
-  background-color: rgba(52, 199, 89, 0.08);
-  border: 1px solid rgba(52, 199, 89, 0.25);
-  border-radius: var(--radius-sm);
-  padding: 14px 16px;
-}
-
-@media (prefers-color-scheme: dark) {
-  .reset-warning-backup {
-    background-color: rgba(48, 209, 88, 0.12);
-    border-color: rgba(48, 209, 88, 0.3);
-  }
-}
-
-.reset-warning-backup-title {
-  margin: 0 0 4px 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.reset-warning-backup-hint {
-  margin: 0 0 10px 0;
+.about-version {
   font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 8px;
+}
+
+.about-tagline {
+  font-size: 14px;
   color: var(--text-muted);
   line-height: 1.4;
 }
 
-.reset-export-btn {
-  width: 100%;
-  justify-content: center;
+.about-block {
+  padding: 14px 16px;
 }
 
-.reset-actions {
-  display: flex;
-  gap: 10px;
-}
-
-.reset-actions .btn {
-  flex: 1;
-}
-
-/* Danger button variant */
-.btn-danger {
-  background-color: #ff3b30;
-  color: white;
-  border: 1px solid #ff3b30;
-}
-
-.btn-danger:hover {
-  background-color: #e0322a;
-  border-color: #e0322a;
-}
-
-@media (prefers-color-scheme: dark) {
-  .btn-danger {
-    background-color: #ff453a;
-    border-color: #ff453a;
-  }
-  
-  .btn-danger:hover {
-    background-color: #d83a30;
-    border-color: #d83a30;
-  }
-}
-
-.btn-danger:disabled,
-.btn-danger.btn-disabled {
-  background-color: rgba(255, 59, 48, 0.4);
-  border-color: rgba(255, 59, 48, 0.4);
-  color: rgba(255, 255, 255, 0.7);
-  cursor: not-allowed;
-  pointer-events: none;
-}
-
-@media (prefers-color-scheme: dark) {
-  .btn-danger:disabled,
-  .btn-danger.btn-disabled {
-    background-color: rgba(255, 69, 58, 0.35);
-    border-color: rgba(255, 69, 58, 0.35);
-  }
-}
-
-/* Reset confirmation modal */
-.reset-confirm {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.reset-confirm-intro {
-  margin: 0;
+.about-block-title {
   font-size: 14px;
-  line-height: 1.5;
+  font-weight: 600;
   color: var(--text);
-  text-align: center;
+  margin-bottom: 6px;
 }
 
-.reset-confirm-intro strong {
-  color: #ff3b30;
-  font-family: 'SF Mono', Monaco, monospace;
-  letter-spacing: 0.05em;
-}
-
-@media (prefers-color-scheme: dark) {
-  .reset-confirm-intro strong {
-    color: #ff453a;
-  }
-}
-
-.reset-confirm-input {
-  width: 100%;
-  padding: 12px 14px;
-  font-family: 'SF Mono', Monaco, monospace;
-  font-size: 18px;
-  letter-spacing: 0.1em;
-  text-align: center;
-  color: var(--text);
-  background-color: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  outline: none;
-  transition: border-color 0.15s ease;
-  -webkit-appearance: none;
-  appearance: none;
-}
-
-.reset-confirm-input:focus {
-  border-color: #ff3b30;
-  box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.15);
-}
-
-@media (prefers-color-scheme: dark) {
-  .reset-confirm-input:focus {
-    border-color: #ff453a;
-    box-shadow: 0 0 0 3px rgba(255, 69, 58, 0.2);
-  }
-}
-
-/* Reset success */
-.reset-success-hint {
-  margin: 0;
-  font-size: 14px;
+.about-block-text {
+  margin: 0 0 6px 0;
+  font-size: 13px;
   color: var(--text-muted);
-  text-align: center;
   line-height: 1.5;
 }
+
+.about-block-text:last-child {
+  margin-bottom: 0;
+}
+
+.about-block-subtle {
+  font-size: 12px;
+  font-style: italic;
+}
+
+.about-tech-list {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-muted);
+}
+
+.about-tech-list li {
+  padding-left: 4px;
+}
+
+.about-footer {
+  padding: 16px;
+  text-align: center;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+
+.about-footer-text {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.about-footer-version {
+  font-family: 'SF Mono', Monaco, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
