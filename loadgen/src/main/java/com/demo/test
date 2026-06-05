@@ -1,11 +1,230 @@
-${isIOSNonSafari() ? `
-        <div class="settings-divider"></div>
-        <div class="data-action-row">
-          <button type="button" class="data-action-btn" id="import-paste-btn">
-            <div class="data-action-content">
-              <div class="data-action-label">📋 Paste backup text...</div>
-              <div class="data-action-hint">If the file picker isn't working on your browser</div>
-            </div>
-          </button>
-        </div>
-      ` : ''}
+// src/db/store.js
+
+// ============================================================
+// IMPORT HELPERS (used by Step 1.4.F.3.B.2.C)
+// ============================================================
+
+/**
+ * Deletes all custom (non-seeded) activities, all routines, and all sessions.
+ * Used by the Replace import strategy. Preserves seeded activities.
+ */
+export async function wipeUserData() {
+  const db = await getDB();
+  
+  // Get all activities to identify which ones to delete (non-seeded only)
+  const activities = await db.getAll(STORE_ACTIVITIES);
+  const customActivityIds = activities
+    .filter((a) => a.isSeeded !== true)
+    .map((a) => a.id);
+  
+  const tx = db.transaction(
+    [STORE_ROUTINES, STORE_ACTIVITIES, STORE_SESSIONS],
+    'readwrite'
+  );
+  
+  // Clear routines (full wipe — none are "seeded" by app)
+  await tx.objectStore(STORE_ROUTINES).clear();
+  
+  // Clear sessions
+  await tx.objectStore(STORE_SESSIONS).clear();
+  
+  // Delete only custom activities (preserve seeded ones)
+  const activityStore = tx.objectStore(STORE_ACTIVITIES);
+  for (const id of customActivityIds) {
+    await activityStore.delete(id);
+  }
+  
+  await tx.done;
+  
+  return {
+    routinesDeleted: true,
+    sessionsDeleted: true,
+    customActivitiesDeleted: customActivityIds.length,
+  };
+}
+
+/**
+ * Imports backup data using the Merge strategy (or after a wipe for Replace).
+ * Always skips seeded activities in the backup.
+ * Returns counts of what was actually imported.
+ */
+export async function importBackupData(data) {
+  const db = await getDB();
+  
+  // Filter out seeded activities from the backup
+  const activitiesToImport = (data.activities || []).filter(
+    (a) => a && a.isSeeded !== true
+  );
+  
+  const routinesToImport = data.routines || [];
+  const sessionsToImport = data.sessions || [];
+  
+  const tx = db.transaction(
+    [STORE_ROUTINES, STORE_ACTIVITIES, STORE_SESSIONS],
+    'readwrite'
+  );
+  
+  // Import routines
+  const routineStore = tx.objectStore(STORE_ROUTINES);
+  for (const routine of routinesToImport) {
+    if (routine && routine.id) {
+      await routineStore.put(routine);
+    }
+  }
+  
+  // Import custom activities (put = upsert by id)
+  const activityStore = tx.objectStore(STORE_ACTIVITIES);
+  for (const activity of activitiesToImport) {
+    if (activity && activity.id) {
+      await activityStore.put(activity);
+    }
+  }
+  
+  // Import sessions
+  const sessionStore = tx.objectStore(STORE_SESSIONS);
+  for (const session of sessionsToImport) {
+    if (session && session.id) {
+      await sessionStore.put(session);
+    }
+  }
+  
+  await tx.done;
+  
+  return {
+    routines: routinesToImport.length,
+    customActivities: activitiesToImport.length,
+    sessions: sessionsToImport.length,
+    seededSkipped: (data.activities || []).length - activitiesToImport.length,
+  };
+}
+
+// src/views/dataSection.js
+async function executeImport(data, summary, strategy) {
+  // Show a loading modal so user knows something is happening
+  const loadingContent = document.createElement('div');
+  loadingContent.className = 'import-loading';
+  loadingContent.innerHTML = `
+    <p class="import-loading-text">
+      ${strategy === 'replace' ? 'Replacing your data...' : 'Merging backup...'}
+    </p>
+  `;
+  const loadingModal = openModal({
+    title: 'Importing...',
+    content: loadingContent,
+    dismissable: false,
+  });
+  
+  try {
+    let wipeResult = null;
+    
+    if (strategy === 'replace') {
+      wipeResult = await wipeUserData();
+      console.log('[Import] Wiped:', wipeResult);
+    }
+    
+    const importResult = await importBackupData(data);
+    console.log('[Import] Imported:', importResult);
+    
+    closeModal(loadingModal);
+    
+    // Show success modal after a brief delay (let close animation play)
+    setTimeout(() => {
+      showImportSuccess(strategy, importResult);
+    }, 200);
+  } catch (err) {
+    console.error('[Import] Failed:', err);
+    closeModal(loadingModal);
+    setTimeout(() => {
+      alert('Import failed:\n\n' + err.message);
+    }, 200);
+  }
+}
+
+function showImportSuccess(strategy, result) {
+  const content = document.createElement('div');
+  content.className = 'import-success';
+  content.innerHTML = `
+    <div class="import-success-icon">✅</div>
+    <p class="import-success-title">Import complete!</p>
+    
+    <div class="import-summary">
+      <div class="import-summary-title">${strategy === 'replace' ? 'Replaced with:' : 'Imported:'}</div>
+      <ul class="import-summary-list">
+        <li>
+          <span class="import-summary-count">${result.routines}</span>
+          <span class="import-summary-label">routine${result.routines === 1 ? '' : 's'}</span>
+        </li>
+        <li>
+          <span class="import-summary-count">${result.customActivities}</span>
+          <span class="import-summary-label">custom ${result.customActivities === 1 ? 'activity' : 'activities'}</span>
+        </li>
+        <li>
+          <span class="import-summary-count">${result.sessions}</span>
+          <span class="import-summary-label">session${result.sessions === 1 ? '' : 's'}</span>
+        </li>
+        ${result.seededSkipped > 0 ? `
+          <li class="import-summary-skipped">
+            <span class="import-summary-count">${result.seededSkipped}</span>
+            <span class="import-summary-label">seeded ${result.seededSkipped === 1 ? 'activity' : 'activities'}</span>
+            <span class="import-summary-note">(skipped)</span>
+          </li>
+        ` : ''}
+      </ul>
+    </div>
+    
+    <div class="editor-actions">
+      <button type="button" class="btn btn-primary" id="success-done-btn">Done</button>
+    </div>
+  `;
+  
+  const modal = openModal({
+    title: 'Success',
+    content,
+    dismissable: false,  // require explicit Done click so user sees the summary
+  });
+  
+  content.querySelector('#success-done-btn').addEventListener('click', () => {
+    closeModal(modal);
+    // Navigate to home to refresh all views
+    setTimeout(() => {
+      router.navigate('/');
+    }, 200);
+  });
+}
+
+// style
+/* === Import Loading + Success === */
+
+.import-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px;
+}
+
+.import-loading-text {
+  margin: 0;
+  font-size: 15px;
+  color: var(--text);
+  text-align: center;
+}
+
+.import-success {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.import-success-icon {
+  font-size: 48px;
+  text-align: center;
+  margin-top: 8px;
+}
+
+.import-success-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--text);
+}
