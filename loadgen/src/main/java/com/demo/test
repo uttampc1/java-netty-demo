@@ -1,329 +1,111 @@
-// src/core/sessionEngine.js
-/**
- * HoldOn — Session Engine
- * 
- * Drift-resistant timer + state machine for running a workout routine.
- * Emits events that the UI subscribes to.
- * 
- * Phases:
- *   - 'idle'         : not started
- *   - 'prep'         : 3-second countdown before workout
- *   - 'work'         : active exercise (countdown)
- *   - 'rest-set'     : rest between sets of same exercise
- *   - 'rest-exercise': rest between different exercises
- *   - 'complete'     : workout finished
- * 
- * Events:
- *   - 'tick'        : { timeRemaining, totalElapsed, state }
- *   - 'phaseChange' : { from, to, state }
- *   - 'complete'    : { state, totalElapsed }
- * 
- * Usage:
- *   const engine = new SessionEngine(routine, { prepDuration: 3 });
- *   engine.on('tick', (data) => { ... });
- *   engine.on('phaseChange', (data) => { ... });
- *   engine.on('complete', (data) => { ... });
- *   engine.start();
- */
+const { SessionEngine } = await import('/src/core/sessionEngine.js')
 
-const TICK_INTERVAL_MS = 100;  // 10 updates per second — smooth display
-const DEFAULT_PREP_DURATION = 3;
+// Create a minimal test routine
+const testRoutine = {
+  id: 'test',
+  title: 'Test Routine',
+  restBetweenExercises: 5,
+  exercises: [
+    { id: 'ex1', name: 'Push-ups', workDuration: 4, restBetweenSets: 2, sets: 2 },
+    { id: 'ex2', name: 'Squats', workDuration: 3, restBetweenSets: 0, sets: 1 },
+  ],
+};
 
-export class SessionEngine {
-  constructor(routine, options = {}) {
-    if (!routine || !Array.isArray(routine.exercises) || routine.exercises.length === 0) {
-      throw new Error('SessionEngine requires a routine with at least one exercise');
-    }
-    
-    this.routine = routine;
-    this.prepDuration = options.prepDuration ?? DEFAULT_PREP_DURATION;
-    
-    // State
-    this.phase = 'idle';
-    this.currentExerciseIndex = 0;
-    this.currentSet = 1;
-    this.timeRemaining = 0;       // seconds remaining in current phase
-    this.phaseDuration = 0;       // total seconds for current phase
-    this.totalElapsed = 0;        // total seconds elapsed since start
-    
-    // Tick mechanics
-    this._tickHandle = null;
-    this._phaseStartTime = null;  // performance.now() when phase began
-    this._pausedAt = null;        // performance.now() when paused, null if running
-    this._sessionStartTime = null;
-    this._totalPausedDuration = 0;
-    
-    // Event listeners
-    this._listeners = {
-      tick: [],
-      phaseChange: [],
-      complete: [],
-    };
-  }
-  
-  // ============================================================
-  // PUBLIC API
-  // ============================================================
-  
-  /**
-   * Start the workout (transitions from 'idle' to 'prep').
-   */
-  start() {
-    if (this.phase !== 'idle') {
-      console.warn('[SessionEngine] start() called but phase is not idle:', this.phase);
-      return;
-    }
-    
-    this._sessionStartTime = performance.now();
-    this._transitionTo('prep', this.prepDuration);
-    this._startTicking();
-  }
-  
-  /**
-   * Pause the timer (freezes remaining time).
-   */
-  pause() {
-    if (this._pausedAt !== null) return;  // already paused
-    if (this.phase === 'idle' || this.phase === 'complete') return;
-    
-    this._pausedAt = performance.now();
-    this._stopTicking();
-  }
-  
-  /**
-   * Resume from pause.
-   */
-  resume() {
-    if (this._pausedAt === null) return;  // not paused
-    
-    // Adjust phase start time so timeRemaining stays correct
-    const pauseDuration = performance.now() - this._pausedAt;
-    this._phaseStartTime += pauseDuration;
-    this._totalPausedDuration += pauseDuration;
-    this._pausedAt = null;
-    
-    this._startTicking();
-  }
-  
-  /**
-   * Skip to the next phase immediately.
-   */
-  skip() {
-    if (this.phase === 'idle' || this.phase === 'complete') return;
-    this._advancePhase();
-  }
-  
-  /**
-   * Stop the workout entirely (transitions to 'idle' or 'complete' depending on context).
-   * Use this for "exit" — does not auto-advance.
-   */
-  stop() {
-    this._stopTicking();
-    this.phase = 'idle';
-    this._pausedAt = null;
-  }
-  
-  /**
-   * Returns true if currently paused.
-   */
-  isPaused() {
-    return this._pausedAt !== null;
-  }
-  
-  /**
-   * Returns true if engine is in an active phase (not idle/complete).
-   */
-  isActive() {
-    return this.phase !== 'idle' && this.phase !== 'complete';
-  }
-  
-  /**
-   * Returns a snapshot of the current state (for UI rendering).
-   */
-  getState() {
-    return {
-      phase: this.phase,
-      currentExerciseIndex: this.currentExerciseIndex,
-      currentExercise: this.routine.exercises[this.currentExerciseIndex] || null,
-      currentSet: this.currentSet,
-      timeRemaining: Math.max(0, Math.ceil(this.timeRemaining)),
-      phaseDuration: this.phaseDuration,
-      totalElapsed: Math.floor(this.totalElapsed),
-      isPaused: this.isPaused(),
-      totalExercises: this.routine.exercises.length,
-    };
-  }
-  
-  // ============================================================
-  // EVENT SUBSCRIPTION
-  // ============================================================
-  
-  on(event, callback) {
-    if (this._listeners[event]) {
-      this._listeners[event].push(callback);
-    }
-    // Return an unsubscribe function
-    return () => this.off(event, callback);
-  }
-  
-  off(event, callback) {
-    if (this._listeners[event]) {
-      this._listeners[event] = this._listeners[event].filter((cb) => cb !== callback);
-    }
-  }
-  
-  _emit(event, data) {
-    if (this._listeners[event]) {
-      this._listeners[event].forEach((cb) => {
-        try {
-          cb(data);
-        } catch (err) {
-          console.error(`[SessionEngine] Listener for "${event}" threw:`, err);
-        }
-      });
-    }
-  }
-  
-  // ============================================================
-  // INTERNAL: TICK LOOP
-  // ============================================================
-  
-  _startTicking() {
-    if (this._tickHandle !== null) return;
-    this._tickHandle = setInterval(() => this._tick(), TICK_INTERVAL_MS);
-  }
-  
-  _stopTicking() {
-    if (this._tickHandle !== null) {
-      clearInterval(this._tickHandle);
-      this._tickHandle = null;
-    }
-  }
-  
-  _tick() {
-    if (this._pausedAt !== null) return;  // safety: shouldn't happen but just in case
-    
-    const now = performance.now();
-    const elapsedInPhase = (now - this._phaseStartTime) / 1000;  // seconds
-    this.timeRemaining = this.phaseDuration - elapsedInPhase;
-    this.totalElapsed = (now - this._sessionStartTime - this._totalPausedDuration) / 1000;
-    
-    this._emit('tick', this.getState());
-    
-    if (this.timeRemaining <= 0) {
-      this._advancePhase();
-    }
-  }
-  
-  // ============================================================
-  // INTERNAL: PHASE TRANSITIONS
-  // ============================================================
-  
-  _advancePhase() {
-    const currentExercise = this.routine.exercises[this.currentExerciseIndex];
-    if (!currentExercise) {
-      this._complete();
-      return;
-    }
-    
-    if (this.phase === 'prep') {
-      // Prep → Work (first exercise, first set)
-      this._transitionTo('work', currentExercise.workDuration);
-      return;
-    }
-    
-    if (this.phase === 'work') {
-      // Work done — what's next?
-      const isLastSet = this.currentSet >= currentExercise.sets;
-      const isLastExercise = this.currentExerciseIndex >= this.routine.exercises.length - 1;
-      
-      if (!isLastSet) {
-        // More sets of this exercise
-        if (currentExercise.restBetweenSets > 0) {
-          this._transitionTo('rest-set', currentExercise.restBetweenSets);
-        } else {
-          // No rest configured — go straight to next set
-          this.currentSet++;
-          this._transitionTo('work', currentExercise.workDuration);
-        }
-        return;
-      }
-      
-      // Last set of this exercise — is there a next exercise?
-      if (!isLastExercise) {
-        if (this.routine.restBetweenExercises > 0) {
-          this._transitionTo('rest-exercise', this.routine.restBetweenExercises);
-        } else {
-          // No rest configured — go straight to next exercise
-          this.currentExerciseIndex++;
-          this.currentSet = 1;
-          const nextEx = this.routine.exercises[this.currentExerciseIndex];
-          this._transitionTo('work', nextEx.workDuration);
-        }
-        return;
-      }
-      
-      // Last set of last exercise — DONE!
-      this._complete();
-      return;
-    }
-    
-    if (this.phase === 'rest-set') {
-      // Rest done — move to next set of same exercise
-      this.currentSet++;
-      this._transitionTo('work', currentExercise.workDuration);
-      return;
-    }
-    
-    if (this.phase === 'rest-exercise') {
-      // Rest done — move to next exercise, set 1
-      this.currentExerciseIndex++;
-      this.currentSet = 1;
-      const nextEx = this.routine.exercises[this.currentExerciseIndex];
-      if (!nextEx) {
-        this._complete();
-        return;
-      }
-      this._transitionTo('work', nextEx.workDuration);
-      return;
-    }
-  }
-  
-  _transitionTo(newPhase, duration) {
-    const fromPhase = this.phase;
-    this.phase = newPhase;
-    this.phaseDuration = duration;
-    this.timeRemaining = duration;
-    this._phaseStartTime = performance.now();
-    
-    this._emit('phaseChange', {
-      from: fromPhase,
-      to: newPhase,
-      state: this.getState(),
-    });
-    
-    console.log(`[SessionEngine] ${fromPhase} → ${newPhase} (${duration}s)`);
-  }
-  
-  _complete() {
-    this._stopTicking();
-    const fromPhase = this.phase;
-    this.phase = 'complete';
-    this.timeRemaining = 0;
-    
-    this._emit('phaseChange', {
-      from: fromPhase,
-      to: 'complete',
-      state: this.getState(),
-    });
-    
-    this._emit('complete', {
-      state: this.getState(),
-      totalElapsed: Math.floor(this.totalElapsed),
-    });
-    
-    console.log(`[SessionEngine] Workout complete! Total: ${Math.floor(this.totalElapsed)}s`);
-  }
-}
+const engine = new SessionEngine(testRoutine, { prepDuration: 2 });
 
-// 
+console.log('Initial state:', engine.getState());
+
+
+DONT RELOAD,
+// Listen for all events
+engine.on('phaseChange', (data) => {
+  console.log(`📍 PHASE: ${data.from} → ${data.to}`, data.state);
+});
+
+engine.on('tick', (data) => {
+  // Only log every full second to avoid spam
+  if (data.timeRemaining === Math.floor(data.timeRemaining)) {
+    console.log(`⏱  ${data.phase}: ${data.timeRemaining}s remaining`);
+  }
+});
+
+engine.on('complete', (data) => {
+  console.log(`🎉 COMPLETE! Total elapsed: ${data.totalElapsed}s`);
+});
+
+// Start the workout
+engine.start();
+
+// PAUSE test
+const engine2 = new SessionEngine({
+  id: 'p',
+  title: 'Pause Test',
+  restBetweenExercises: 0,
+  exercises: [{ id: 'e', name: 'Hold', workDuration: 10, restBetweenSets: 0, sets: 1 }],
+}, { prepDuration: 0 });
+
+engine2.on('tick', (d) => {
+  if (d.timeRemaining === Math.floor(d.timeRemaining)) {
+    console.log(`⏱ ${d.timeRemaining}s`);
+  }
+});
+
+engine2.start();
+
+// After 3 seconds, pause
+setTimeout(() => {
+  console.log('⏸ PAUSING');
+  engine2.pause();
+}, 3500);
+
+// After 6 seconds total (3 paused), resume
+setTimeout(() => {
+  console.log('▶ RESUMING');
+  engine2.resume();
+}, 6500);
+
+// SKIP
+const engine3 = new SessionEngine({
+  id: 's',
+  title: 'Skip Test',
+  restBetweenExercises: 0,
+  exercises: [
+    { id: 'e1', name: 'First', workDuration: 30, restBetweenSets: 0, sets: 1 },
+    { id: 'e2', name: 'Second', workDuration: 5, restBetweenSets: 0, sets: 1 },
+  ],
+}, { prepDuration: 0 });
+
+engine3.on('phaseChange', (d) => console.log(`📍 ${d.from} → ${d.to}`, d.state.currentExercise?.name));
+
+engine3.start();
+
+setTimeout(() => {
+  console.log('⏭ SKIP');
+  engine3.skip();
+}, 1500);
+
+// EDGE case
+// Single exercise, single set, no rests
+const minimal = new SessionEngine({
+  id: 'm',
+  title: 'Minimal',
+  restBetweenExercises: 0,
+  exercises: [{ id: 'e', name: 'Only', workDuration: 3, restBetweenSets: 0, sets: 1 }],
+}, { prepDuration: 0 });
+
+minimal.on('phaseChange', (d) => console.log(`📍 ${d.from} → ${d.to}`));
+minimal.on('complete', () => console.log('✅ Done'));
+minimal.start();
+
+// May steps
+// Many sets, with rest
+const reps = new SessionEngine({
+  id: 'r',
+  title: 'Reps',
+  restBetweenExercises: 0,
+  exercises: [{ id: 'e', name: 'Reps', workDuration: 2, restBetweenSets: 1, sets: 3 }],
+}, { prepDuration: 0 });
+
+reps.on('phaseChange', (d) => console.log(`📍 ${d.from} → ${d.to} (set ${d.state.currentSet})`));
+reps.on('complete', () => console.log('✅ Done'));
+reps.start();
