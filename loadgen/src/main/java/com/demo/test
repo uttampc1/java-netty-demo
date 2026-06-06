@@ -1,461 +1,446 @@
-// src/views/player.js
+// src/utils/beep.js
 /**
- * HoldOn — Session Player (Workout Runner)
+ * HoldOn — Audio + Haptic helpers for cue playback
  * 
- * Full-screen view that guides user through a workout routine.
- * Step 2.3: Connected to SessionEngine for live timer + phase transitions.
- * 
- * Route: #/play/:routineId
+ * Wraps Web Audio API and Vibration API with sensible defaults.
  */
 
-import { getRoutine } from '../db/store.js';
-import { router } from '../utils/router.js';
-import { confirmModal, alertModal } from '../components/dialog.js';
-import { SessionEngine } from '../core/sessionEngine.js';
+let audioCtx = null;
+let audioUnlocked = false;
 
-// Module-level reference to the active engine (for cleanup on navigation away)
-let activeEngine = null;
-let activeContainer = null;
-let unsubscribers = [];
+function getAudioContext() {
+  if (!audioCtx) {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    try {
+      audioCtx = new Ctx();
+    } catch (err) {
+      console.warn('[Audio] Could not create AudioContext:', err);
+      return null;
+    }
+  }
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+  return audioCtx;
+}
 
-export async function renderPlayer(container, routineId) {
-  // Cleanup any previous engine (e.g., user navigated away and came back)
-  cleanupEngine();
+/**
+ * Unlocks the audio context — MUST be called from a user gesture handler on iOS.
+ * Plays a silent sound to satisfy iOS Safari's autoplay restrictions.
+ */
+export function unlockAudio() {
+  if (audioUnlocked) return;
   
-  let routine;
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  
   try {
-    routine = await getRoutine(routineId);
+    // Play a 1-sample silent buffer to "warm up" the audio context
+    const buffer = ctx.createBuffer(1, 1, 22050);
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    source.start(0);
+    audioUnlocked = true;
+    console.log('[Audio] Context unlocked');
   } catch (err) {
-    console.error('[Player] Failed to load routine:', err);
-    await alertModal({
-      title: 'Could not load routine',
-      message: err.message || 'The routine could not be found.',
-    });
-    router.navigate('/');
-    return;
+    console.warn('[Audio] Unlock failed:', err);
   }
-  
-  if (!routine) {
-    await alertModal({
-      title: 'Routine not found',
-      message: 'This routine no longer exists.',
-    });
-    router.navigate('/');
-    return;
-  }
-  
-  if (!routine.exercises || routine.exercises.length === 0) {
-    await alertModal({
-      title: 'No exercises',
-      message: 'This routine has no exercises. Add some first!',
-    });
-    router.navigate(`/routine/${routineId}`);
-    return;
-  }
-  
-  // Create the engine
-  const engine = new SessionEngine(routine, { prepDuration: 3 });
-  activeEngine = engine;
-  activeContainer = container;
-  
-  // Initial render with idle state, then engine.start() will trigger phaseChange to prep
-  renderPlayerUI(container, routine, engine.getState());
-  
-  // Subscribe to engine events
-  const unsubTick = engine.on('tick', (state) => {
-    updateTimerOnly(container, state);
-  });
-  
-  const unsubPhase = engine.on('phaseChange', (data) => {
-    if (data.to === 'complete') return;  // handled by 'complete' event
-    renderPlayerUI(container, routine, data.state);
-  });
-  
-  const unsubComplete = engine.on('complete', (data) => {
-    renderCompletionScreen(container, routine, data);
-  });
-  
-  unsubscribers = [unsubTick, unsubPhase, unsubComplete];
-  
-  // Start the workout
-  engine.start();
 }
 
 /**
- * Called when navigating away from the player route.
- * Exported so main.js router can invoke it via teardown.
+ * Plays a single beep tone.
+ * @param {Object} options
+ * @param {number} [options.frequency=880] - Hz
+ * @param {number} [options.duration=0.15] - seconds
+ * @param {number} [options.volume=0.7]    - 0.0 to 1.0
+ * @param {number} [options.startAt=0]     - delay in seconds from now
+ * @param {string} [options.type='sine']   - oscillator type
  */
-export function cleanupEngine() {
-  if (activeEngine) {
-    activeEngine.stop();
-    activeEngine = null;
-  }
-  unsubscribers.forEach((unsub) => {
-    try { unsub(); } catch (e) {}
-  });
-  unsubscribers = [];
-  activeContainer = null;
-}
+export function playBeep({
+  frequency = 880,
+  duration = 0.15,
+  volume = 0.7,
+  startAt = 0,
+  type = 'sine',
+} = {}) {
+  const ctx = getAudioContext();
+  if (!ctx) return;
 
-// ============================================================
-// RENDERING
-// ============================================================
+  const oscillator = ctx.createOscillator();
+  const gainNode = ctx.createGain();
 
-/**
- * Full UI re-render (called on phase changes, NOT on every tick).
- */
-function renderPlayerUI(container, routine, state) {
-  const currentExercise = state.currentExercise;
-  const phaseInfo = getPhaseInfo(state.phase);
-  const nextUp = getNextUpLabel(routine, state);
-  const isPaused = state.isPaused;
+  oscillator.type = type;
+  oscillator.frequency.value = frequency;
+
+  const startTime = ctx.currentTime + startAt;
+  const endTime = startTime + duration;
   
-  container.innerHTML = `
-    <div class="player" data-phase="${state.phase}" data-paused="${isPaused ? 'true' : 'false'}">
-      <div class="player-top">
-        <div class="player-routine-title">${escapeHtml(routine.title)}</div>
-        <div class="player-exercise-progress">
-          Exercise ${state.currentExerciseIndex + 1} of ${state.totalExercises}
-        </div>
-      </div>
-      
-      <div class="player-main">
-        ${currentExercise ? `
-          <div class="player-exercise-name">${escapeHtml(currentExercise.name)}</div>
-          
-          ${currentExercise.sets > 1 ? `
-            <div class="player-set-counter">Set ${state.currentSet} of ${currentExercise.sets}</div>
-          ` : ''}
-          
-          <div class="player-phase-label">
-            <span class="player-phase-dot"></span>
-            ${escapeHtml(phaseInfo.label)}
-          </div>
-          
-          <div class="player-timer" id="player-timer">${formatTime(state.timeRemaining)}</div>
-          
-          ${nextUp ? `
-            <div class="player-next">${escapeHtml(nextUp)}</div>
-          ` : ''}
-        ` : ''}
-        
-        ${isPaused ? `
-          <div class="player-paused-banner">⏸ Paused</div>
-        ` : ''}
-      </div>
-      
-      <div class="player-controls">
-        <button type="button" class="player-control-btn player-pause-btn" id="player-pause-btn">
-          <span class="player-control-icon">${isPaused ? '▶' : '⏸'}</span>
-          <span class="player-control-label">${isPaused ? 'Resume' : 'Pause'}</span>
-        </button>
-        <button type="button" class="player-control-btn player-skip-btn" id="player-skip-btn">
-          <span class="player-control-icon">⏭</span>
-          <span class="player-control-label">Skip</span>
-        </button>
-        <button type="button" class="player-control-btn player-exit-btn" id="player-exit-btn">
-          <span class="player-control-icon">✕</span>
-          <span class="player-control-label">Exit</span>
-        </button>
-      </div>
-    </div>
-  `;
-  
-  wirePlayerControls(container, routine);
+  // Envelope: quick attack, smooth decay (avoids clicks)
+  gainNode.gain.setValueAtTime(0, startTime);
+  gainNode.gain.linearRampToValueAtTime(volume, startTime + 0.01);
+  gainNode.gain.exponentialRampToValueAtTime(0.001, endTime);
+
+  oscillator.connect(gainNode);
+  gainNode.connect(ctx.destination);
+
+  oscillator.start(startTime);
+  oscillator.stop(endTime + 0.05);
 }
 
 /**
- * Lightweight update for every tick — only changes the timer text.
- * Avoids re-rendering the whole player on every 100ms tick.
+ * Plays a pattern of beeps (sequence).
+ * @param {Array<Object>} pattern - Array of beep config objects (with optional `startAt`)
+ * @param {number} volume - 0.0 to 1.0 (applied to all beeps in pattern)
  */
-function updateTimerOnly(container, state) {
-  const timerEl = container.querySelector('#player-timer');
-  if (timerEl) {
-    timerEl.textContent = formatTime(state.timeRemaining);
-  }
-}
-
-function renderCompletionScreen(container, routine, completeData) {
-  const totalMinutes = Math.floor(completeData.totalElapsed / 60);
-  const totalSeconds = completeData.totalElapsed % 60;
-  const timeLabel = totalMinutes > 0
-    ? `${totalMinutes}m ${totalSeconds}s`
-    : `${totalSeconds}s`;
-  
-  container.innerHTML = `
-    <div class="player player-complete" data-phase="complete">
-      <div class="player-main">
-        <div class="player-complete-icon">🎉</div>
-        <div class="player-complete-title">Workout Complete!</div>
-        <div class="player-complete-routine">${escapeHtml(routine.title)}</div>
-        
-        <div class="player-complete-stats">
-          <div class="player-complete-stat">
-            <div class="player-complete-stat-value">${timeLabel}</div>
-            <div class="player-complete-stat-label">Total Time</div>
-          </div>
-          <div class="player-complete-stat">
-            <div class="player-complete-stat-value">${routine.exercises.length}</div>
-            <div class="player-complete-stat-label">Exercise${routine.exercises.length === 1 ? '' : 's'}</div>
-          </div>
-        </div>
-        
-        <div class="player-complete-note muted">
-          Session recording coming in Step 2.6.
-        </div>
-      </div>
-      
-      <div class="player-controls">
-        <button type="button" class="player-control-btn player-exit-btn" id="player-complete-done">
-          <span class="player-control-icon">✓</span>
-          <span class="player-control-label">Done</span>
-        </button>
-      </div>
-    </div>
-  `;
-  
-  container.querySelector('#player-complete-done').addEventListener('click', () => {
-    cleanupEngine();
-    router.navigate(`/routine/${routine.id}`);
+export function playBeepPattern(pattern, volume = 0.7) {
+  let offset = 0;
+  pattern.forEach((beep) => {
+    playBeep({
+      ...beep,
+      volume,
+      startAt: offset + (beep.startAt || 0),
+    });
+    offset += (beep.duration || 0.15) + (beep.gap || 0.05);
   });
 }
 
-// ============================================================
-// CONTROLS
-// ============================================================
-
-function wirePlayerControls(container, routine) {
-  const pauseBtn = container.querySelector('#player-pause-btn');
-  const skipBtn = container.querySelector('#player-skip-btn');
-  const exitBtn = container.querySelector('#player-exit-btn');
-  
-  if (pauseBtn) {
-    pauseBtn.addEventListener('click', () => {
-      if (!activeEngine) return;
-      if (activeEngine.isPaused()) {
-        activeEngine.resume();
-      } else {
-        activeEngine.pause();
-      }
-      // Re-render to reflect new pause state
-      renderPlayerUI(container, routine, activeEngine.getState());
-    });
-  }
-  
-  if (skipBtn) {
-    skipBtn.addEventListener('click', async () => {
-      if (!activeEngine) return;
-      const confirmed = await confirmModal({
-        title: 'Skip current phase?',
-        message: 'This will advance to the next phase.',
-        confirmLabel: 'Skip',
-        cancelLabel: 'Cancel',
-      });
-      if (confirmed && activeEngine) {
-        activeEngine.skip();
-      }
-    });
-  }
-  
-  if (exitBtn) {
-    exitBtn.addEventListener('click', async () => {
-      // Pause while user decides (don't waste their time)
-      const wasPaused = activeEngine ? activeEngine.isPaused() : true;
-      if (activeEngine && !wasPaused) {
-        activeEngine.pause();
-      }
-      
-      const confirmed = await confirmModal({
-        title: 'Exit workout?',
-        message: 'Your progress will not be saved.',
-        confirmLabel: 'Exit',
-        cancelLabel: 'Keep going',
-        danger: true,
-      });
-      
-      if (confirmed) {
-        cleanupEngine();
-        router.navigate(`/routine/${routine.id}`);
-      } else if (activeEngine && !wasPaused) {
-        // Resume if we paused for the dialog and they chose to keep going
-        activeEngine.resume();
-        renderPlayerUI(container, routine, activeEngine.getState());
-      }
-    });
-  }
-}
-
-// ============================================================
-// HELPERS
-// ============================================================
-
-function getPhaseInfo(phase) {
-  const phaseMap = {
-    'idle':         { label: 'Ready',     color: 'gray'  },
-    'prep':         { label: 'Get Ready', color: 'amber' },
-    'work':         { label: 'Work',      color: 'blue'  },
-    'rest-set':     { label: 'Rest',      color: 'green' },
-    'rest-exercise':{ label: 'Rest',      color: 'green' },
-    'complete':     { label: 'Complete!', color: 'gold'  },
-  };
-  return phaseMap[phase] || { label: phase, color: 'gray' };
-}
-
-function getNextUpLabel(routine, state) {
-  const currentExercise = state.currentExercise;
-  if (!currentExercise) return '';
-  
-  if (state.phase === 'prep') {
-    return `Next: Work (${currentExercise.workDuration}s)`;
-  }
-  
-  if (state.phase === 'work') {
-    if (state.currentSet < currentExercise.sets) {
-      return currentExercise.restBetweenSets > 0
-        ? `Next: Rest (${currentExercise.restBetweenSets}s)`
-        : `Next: Set ${state.currentSet + 1}`;
+/**
+ * Triggers a vibration. Silently no-ops if unsupported (iOS).
+ * @param {number|number[]} pattern - milliseconds, or pattern array like [100, 50, 100]
+ */
+export function vibrate(pattern = 60) {
+  if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+    try {
+      navigator.vibrate(pattern);
+    } catch (err) {
+      // ignore
     }
-    if (state.currentExerciseIndex < routine.exercises.length - 1) {
-      const nextEx = routine.exercises[state.currentExerciseIndex + 1];
-      return routine.restBetweenExercises > 0
-        ? `Next: Rest (${routine.restBetweenExercises}s) → ${nextEx.name}`
-        : `Next: ${nextEx.name}`;
+  }
+}
+
+/**
+ * Speaks text using the Web Speech API. Silently no-ops if unsupported.
+ * @param {string} text 
+ * @param {Object} options
+ * @param {number} [options.volume=1.0]  - 0.0 to 1.0
+ * @param {number} [options.rate=1.1]    - speech rate
+ * @param {number} [options.pitch=1.0]   - voice pitch
+ */
+export function speak(text, { volume = 1.0, rate = 1.1, pitch = 1.0 } = {}) {
+  if (!('speechSynthesis' in window)) return;
+  if (!text) return;
+  
+  try {
+    // Cancel any in-progress speech to prevent queuing up
+    window.speechSynthesis.cancel();
+    
+    const utterance = new SpeechSynthesisUtterance(String(text));
+    utterance.volume = volume;
+    utterance.rate = rate;
+    utterance.pitch = pitch;
+    window.speechSynthesis.speak(utterance);
+  } catch (err) {
+    console.warn('[Speech] Failed:', err);
+  }
+}
+
+/**
+ * Stops any in-progress speech immediately.
+ */
+export function stopSpeech() {
+  if ('speechSynthesis' in window) {
+    try {
+      window.speechSynthesis.cancel();
+    } catch (e) {}
+  }
+}
+
+// src/core/cueManager.js
+/**
+ * HoldOn — Cue Manager
+ * 
+ * Plays audio + haptic cues during a workout session.
+ * Reads user preferences from Cue Defaults settings.
+ * 
+ * Usage:
+ *   const cues = new CueManager(cueDefaults);
+ *   cues.unlock();  // call once from user gesture
+ *   cues.cuePhaseStart('work', { exercise, set });
+ *   cues.cueCountdown(3);
+ *   cues.cueComplete();
+ */
+
+import { playBeep, playBeepPattern, speak, vibrate, unlockAudio, stopSpeech } from '../utils/beep.js';
+
+const DEFAULT_SETTINGS = {
+  cueType: 'beep',
+  countdownAnnounce: true,
+  volume: 70,
+};
+
+export class CueManager {
+  constructor(settings = {}) {
+    this.settings = { ...DEFAULT_SETTINGS, ...settings };
+    this._lastAnnouncedSecond = null;  // prevents double-firing for the same second
+  }
+  
+  /**
+   * MUST be called from a user-gesture event handler on iOS to unlock audio.
+   * Safe to call multiple times.
+   */
+  unlock() {
+    unlockAudio();
+  }
+  
+  /**
+   * Updates settings live (e.g., if user changes them during workout).
+   */
+  updateSettings(settings) {
+    this.settings = { ...DEFAULT_SETTINGS, ...settings };
+  }
+  
+  /**
+   * Cue for a phase starting.
+   * @param {string} phase - 'prep' | 'work' | 'rest-set' | 'rest-exercise'
+   * @param {Object} context - { exercise, set, totalSets, isNewExercise }
+   */
+  cuePhaseStart(phase, context = {}) {
+    this._lastAnnouncedSecond = null;  // reset countdown tracker for new phase
+    
+    const volume = this._normalizedVolume();
+    const flags = this._cueFlags();
+    
+    if (phase === 'prep') {
+      if (flags.beep) {
+        playBeep({ frequency: 660, duration: 0.2, volume });
+      }
+      if (flags.voice) {
+        speak('Get ready', { volume });
+      }
+      if (flags.vibration) {
+        vibrate(80);
+      }
+      return;
     }
-    return 'Last set!';
+    
+    if (phase === 'work') {
+      if (flags.beep) {
+        // Two ascending beeps for "start working"
+        playBeepPattern([
+          { frequency: 800, duration: 0.12 },
+          { frequency: 1100, duration: 0.18 },
+        ], volume);
+      }
+      if (flags.voice) {
+        const text = this._buildWorkAnnouncement(context);
+        speak(text, { volume });
+      }
+      if (flags.vibration) {
+        vibrate([100, 50, 100]);
+      }
+      return;
+    }
+    
+    if (phase === 'rest-set' || phase === 'rest-exercise') {
+      if (flags.beep) {
+        // Single lower beep for "rest"
+        playBeep({ frequency: 440, duration: 0.25, volume });
+      }
+      if (flags.voice) {
+        const text = phase === 'rest-exercise' && context.nextExerciseName
+          ? `Rest. Next: ${context.nextExerciseName}`
+          : 'Rest';
+        speak(text, { volume });
+      }
+      if (flags.vibration) {
+        vibrate(60);
+      }
+      return;
+    }
   }
   
-  if (state.phase === 'rest-set') {
-    return `Next: Set ${state.currentSet + 1} of ${currentExercise.sets}`;
+  /**
+   * Plays the countdown cue (3, 2, 1) in the final seconds of a phase.
+   * Only fires if countdownAnnounce is enabled in settings.
+   * @param {number} secondsRemaining - integer (3, 2, or 1)
+   */
+  cueCountdown(secondsRemaining) {
+    if (!this.settings.countdownAnnounce) return;
+    if (secondsRemaining < 1 || secondsRemaining > 3) return;
+    if (secondsRemaining === this._lastAnnouncedSecond) return;  // dedupe
+    
+    this._lastAnnouncedSecond = secondsRemaining;
+    
+    const volume = this._normalizedVolume();
+    const flags = this._cueFlags();
+    
+    if (flags.beep) {
+      // Short tick beep
+      playBeep({ frequency: 1000, duration: 0.08, volume: volume * 0.7 });
+    }
+    if (flags.voice) {
+      // Speak the number
+      speak(String(secondsRemaining), { volume, rate: 1.4 });
+    }
+    if (flags.vibration) {
+      vibrate(40);
+    }
   }
   
-  if (state.phase === 'rest-exercise') {
-    const nextEx = routine.exercises[state.currentExerciseIndex + 1];
-    return nextEx ? `Next: ${nextEx.name}` : '';
+  /**
+   * Cue for workout completion.
+   */
+  cueComplete() {
+    const volume = this._normalizedVolume();
+    const flags = this._cueFlags();
+    
+    if (flags.beep) {
+      // Three ascending beeps — celebratory
+      playBeepPattern([
+        { frequency: 660, duration: 0.15 },
+        { frequency: 880, duration: 0.15 },
+        { frequency: 1320, duration: 0.3 },
+      ], volume);
+    }
+    if (flags.voice) {
+      speak('Workout complete!', { volume });
+    }
+    if (flags.vibration) {
+      // Long celebratory pattern
+      vibrate([200, 100, 200, 100, 400]);
+    }
   }
   
-  return '';
+  /**
+   * Stops any in-progress voice (called when user exits or pauses).
+   */
+  stop() {
+    stopSpeech();
+  }
+  
+  // ============================================================
+  // INTERNALS
+  // ============================================================
+  
+  _normalizedVolume() {
+    const v = this.settings.volume ?? DEFAULT_SETTINGS.volume;
+    return Math.max(0, Math.min(1, v / 100));
+  }
+  
+  /**
+   * Returns which cue types are active based on the cueType setting.
+   */
+  _cueFlags() {
+    const type = this.settings.cueType ?? DEFAULT_SETTINGS.cueType;
+    return {
+      beep:      type === 'beep' || type === 'beep-vibration',
+      voice:     type === 'voice' || type === 'voice-vibration',
+      vibration: type === 'vibration' || type === 'beep-vibration' || type === 'voice-vibration',
+    };
+  }
+  
+  _buildWorkAnnouncement(context) {
+    const { exercise, set, totalSets, isNewExercise } = context;
+    if (!exercise) return 'Work';
+    
+    // New exercise — say the name
+    if (isNewExercise) {
+      return exercise.name;
+    }
+    
+    // Same exercise, new set — say "Set N"
+    if (set && totalSets > 1) {
+      return `Set ${set}`;
+    }
+    
+    return exercise.name;
+  }
 }
 
-function formatTime(seconds) {
-  if (seconds == null || seconds < 0) return '00:00';
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-}
+// Test 1
+const { CueManager } = await import('/src/core/cueManager.js')
 
-function escapeHtml(str) {
-  if (str == null) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
+const cues = new CueManager({ cueType: 'beep', countdownAnnounce: true, volume: 60 });
 
-// src/main.js
-import { renderPlayer, cleanupEngine as cleanupPlayer } from './views/player.js';
+// IMPORTANT: must unlock audio first (simulates user gesture)
+cues.unlock();
 
-// Style
-/* === Phase 2 / Step 2.3 — Player Engine Connection === */
+// Wait a moment then trigger cues
+setTimeout(() => cues.cuePhaseStart('prep'), 500);
+setTimeout(() => cues.cuePhaseStart('work', { 
+  exercise: { name: 'Superman Pose' },
+  isNewExercise: true 
+}), 2000);
+setTimeout(() => cues.cueCountdown(3), 4000);
+setTimeout(() => cues.cueCountdown(2), 5000);
+setTimeout(() => cues.cueCountdown(1), 6000);
+setTimeout(() => cues.cuePhaseStart('rest-set'), 7000);
+setTimeout(() => cues.cueComplete(), 9000);
 
-/* Exercise progress indicator */
-.player-exercise-progress {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-muted);
-  margin-top: 4px;
-  letter-spacing: 0.04em;
-}
+// Test 2
+const cuesVoice = new CueManager({ cueType: 'voice', countdownAnnounce: true, volume: 80 });
+cuesVoice.unlock();
 
-/* Paused state */
-.player[data-paused="true"] {
-  background-color: var(--bg);
-}
+setTimeout(() => cuesVoice.cuePhaseStart('prep'), 500);
+setTimeout(() => cuesVoice.cuePhaseStart('work', { 
+  exercise: { name: 'Plank Pose' },
+  isNewExercise: true 
+}), 2500);
+setTimeout(() => cuesVoice.cueCountdown(3), 5000);
+setTimeout(() => cuesVoice.cueCountdown(2), 6000);
+setTimeout(() => cuesVoice.cueCountdown(1), 7000);
+setTimeout(() => cuesVoice.cuePhaseStart('rest-exercise', { 
+  nextExerciseName: 'Sumo Pose' 
+}), 8000);
+setTimeout(() => cuesVoice.cueComplete(), 11000);
 
-.player[data-paused="true"] .player-timer {
-  opacity: 0.4;
-  transition: opacity 0.2s ease;
-}
+// Test 3
+const cuesCombo = new CueManager({ 
+  cueType: 'beep-vibration', 
+  countdownAnnounce: true, 
+  volume: 70 
+});
+cuesCombo.unlock();
 
-.player[data-paused="true"] .player-phase-dot {
-  animation: none !important;
-  opacity: 0.4;
-}
+cuesCombo.cuePhaseStart('work', { exercise: { name: 'Test' }, isNewExercise: true });
 
-.player-paused-banner {
-  margin-top: 12px;
-  padding: 6px 16px;
-  background-color: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-  letter-spacing: 0.05em;
-}
+// Test 4
+const cuesNoCount = new CueManager({ 
+  cueType: 'beep', 
+  countdownAnnounce: false,  // ← disabled
+  volume: 70 
+});
+cuesNoCount.unlock();
 
-/* Completion screen */
-.player-complete {
-  background-color: var(--bg);
-}
+cuesNoCount.cueCountdown(3);
+cuesNoCount.cueCountdown(2);
+cuesNoCount.cueCountdown(1);
 
-.player-complete-icon {
-  font-size: 80px;
-  line-height: 1;
-  margin-bottom: 16px;
-}
+// test 5
+const cuesSilent = new CueManager({ 
+  cueType: 'beep', 
+  countdownAnnounce: true,
+  volume: 0   // ← muted
+});
+cuesSilent.unlock();
 
-.player-complete-title {
-  font-size: 28px;
-  font-weight: 700;
-  color: var(--text);
-  letter-spacing: -0.02em;
-  margin-bottom: 8px;
-  text-align: center;
-}
+cuesSilent.cuePhaseStart('work', { exercise: { name: 'Silent' }, isNewExercise: true });
+cuesSilent.cueCountdown(3);
+cuesSilent.cueComplete();
 
-.player-complete-routine {
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--text-muted);
-  margin-bottom: 32px;
-  text-align: center;
-}
+// Test 6
+const cuesDedupe = new CueManager({ 
+  cueType: 'beep', 
+  countdownAnnounce: true,
+  volume: 60 
+});
+cuesDedupe.unlock();
 
-.player-complete-stats {
-  display: flex;
-  gap: 24px;
-  justify-content: center;
-  margin-bottom: 32px;
-}
-
-.player-complete-stat {
-  text-align: center;
-  min-width: 100px;
-}
-
-.player-complete-stat-value {
-  font-size: 32px;
-  font-weight: 600;
-  color: var(--accent);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.02em;
-  line-height: 1.1;
-  margin-bottom: 4px;
-}
-
-.player-complete-stat-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.player-complete-note {
-  font-size: 12px;
-  font-style: italic;
-  text-align: center;
-}
-
+// Fire the same countdown second multiple times rapidly
+cuesDedupe.cueCountdown(3);
+cuesDedupe.cueCountdown(3);  // should NOT fire again
+cuesDedupe.cueCountdown(3);  // should NOT fire again
+cuesDedupe.cueCountdown(2);  // should fire (different second)
+cuesDedupe.cueCountdown(2);  // should NOT fire
