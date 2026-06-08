@@ -1,8 +1,128 @@
-⏸ ${escapeHtml(getPausedBannerText())}
+// player.js
 
-function getPausedBannerText() {
-  if (pauseReason === 'visibility') {
-    return 'Paused while screen was locked';
+import { getRoutine, getMeta, setMeta, createSession, updateSession, deleteSession } from '../db/store.js';
+
+
+
+// Show first-time education modal about screen lock behavior
+  try {
+    const educationShown = await getMeta('wakeLockEducationShown');
+    if (!educationShown) {
+      await showWakeLockEducation();
+      await setMeta('wakeLockEducationShown', true);
+    }
+  } catch (err) {
+    console.warn('[Player] Could not check/show education modal:', err);
   }
-  return 'Paused';
+
+
+/**
+ * Shows the one-time educational modal about screen lock behavior.
+ * Returns a Promise that resolves when user dismisses.
+ */
+async function showWakeLockEducation() {
+  const { openModal, closeModal } = await import('../components/modal.js');
+  
+  return new Promise((resolve) => {
+    const content = document.createElement('div');
+    content.className = 'wake-lock-education';
+    content.innerHTML = `
+      <div class="wake-lock-education-icon">📱</div>
+      
+      <p class="wake-lock-education-intro">
+        HoldOn will <strong>keep your screen on</strong> during workouts so you don't miss any cues.
+      </p>
+      
+      <div class="wake-lock-education-note">
+        <div class="wake-lock-education-note-title">⚠️ If you lock your screen</div>
+        <p>
+          Your workout will <strong>pause automatically</strong>. Audio cues can't play when your screen is locked (browser limitation).
+        </p>
+        <p>
+          Tap <strong>Resume</strong> when you unlock to continue.
+        </p>
+      </div>
+      
+      <div class="editor-actions">
+        <button type="button" class="btn btn-primary" id="education-ok-btn">Got it</button>
+      </div>
+    `;
+    
+    const modal = openModal({
+      title: 'About Screen & Audio',
+      content,
+      dismissable: false,
+    });
+    
+    content.querySelector('#education-ok-btn').addEventListener('click', () => {
+      closeModal(modal);
+      resolve();
+    });
+  });
+}
+
+
+
+// add it to renderPlayerUI      
+<div class="player-hint">🔒 Locking the screen will pause this workout</div>
+
+
+// Styles
+/* === Step 2.7.C — Wake Lock Education + Hint === */
+
+/* Education modal */
+.wake-lock-education {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.wake-lock-education-icon {
+  font-size: 48px;
+  text-align: center;
+  margin-top: 4px;
+}
+
+.wake-lock-education-intro {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text);
+  text-align: center;
+}
+
+.wake-lock-education-note {
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+}
+
+.wake-lock-education-note-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.wake-lock-education-note p {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.wake-lock-education-note p:last-child {
+  margin-bottom: 0;
+}
+
+/* Persistent hint at bottom of player */
+.player-hint {
+  flex-shrink: 0;
+  padding: 8px 20px 12px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.7;
+  letter-spacing: 0.02em;
 }
