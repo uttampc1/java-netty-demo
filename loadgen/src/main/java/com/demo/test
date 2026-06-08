@@ -1,1 +1,77 @@
- <span class="btn-icon">📊</span>
+// src/utils/wakeLock.js
+/**
+ * HoldOn — Screen Wake Lock helper
+ *
+ * Keeps the screen on during a workout. Gracefully no-ops on
+ * browsers without Wake Lock API support (older Safari, some Firefox versions).
+ */
+
+let currentLock = null;
+
+/**
+ * Tries to acquire a screen wake lock. Safe to call multiple times.
+ * Returns true if acquired (or already held), false if unsupported/failed.
+ */
+export async function acquireWakeLock() {
+  if (typeof navigator === 'undefined' || !('wakeLock' in navigator)) {
+    console.log('[WakeLock] Not supported in this browser');
+    return false;
+  }
+
+  if (currentLock && !currentLock.released) {
+    return true;  // already held
+  }
+
+  try {
+    currentLock = await navigator.wakeLock.request('screen');
+    console.log('[WakeLock] Acquired');
+
+    currentLock.addEventListener('release', () => {
+      console.log('[WakeLock] Released by system');
+    });
+
+    return true;
+  } catch (err) {
+    console.warn('[WakeLock] Could not acquire:', err.message);
+    currentLock = null;
+    return false;
+  }
+}
+
+/**
+ * Releases any held wake lock. Safe to call when no lock is held.
+ */
+export async function releaseWakeLock() {
+  if (!currentLock) return;
+  try {
+    await currentLock.release();
+    console.log('[WakeLock] Released');
+  } catch (err) {
+    console.warn('[WakeLock] Release failed:', err);
+  }
+  currentLock = null;
+}
+
+/**
+ * Returns true if a wake lock is currently held.
+ */
+export function hasWakeLock() {
+  return currentLock !== null && !currentLock.released;
+}
+
+/**
+ * Returns true if the Wake Lock API is available in this browser.
+ * Used to decide whether to show "browser doesn't support" hints.
+ */
+export function isWakeLockSupported() {
+  return typeof navigator !== 'undefined' && 'wakeLock' in navigator;
+}
+
+// player.js
+import { acquireWakeLock, releaseWakeLock } from '../utils/wakeLock.js';
+
+// Update renderPlayer ()
+
+// Update cleanupEngine()
+
+
