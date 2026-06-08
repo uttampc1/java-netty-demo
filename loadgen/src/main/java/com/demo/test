@@ -1,35 +1,8 @@
-/**
- * Called when browser tab becomes hidden (background/lock) or visible (return).
- * - On hide: pause the workout (audio cues don't work in background anyway)
- * - On show: re-acquire wake lock; user must manually tap Resume
- */
-async function handleVisibilityChange(container) {
-  if (!activeEngine) return;
+⏸ ${escapeHtml(getPausedBannerText())}
 
-  if (document.hidden) {
-    // Going to background — pause if currently running
-    if (activeEngine.isActive() && !activeEngine.isPaused()) {
-      console.log('[Player] Backgrounded — auto-pausing');
-      activeEngine.pause();
-      if (activeCues) activeCues.stop();
-      pauseReason = 'visibility';
-
-      // Re-render to show paused state with reason banner
-      if (activeRoutine) {
-        renderPlayerUI(container, activeRoutine, activeEngine.getState());
-      }
-    }
-  } else {
-    // Coming back to foreground
-    if (activeEngine.isActive()) {
-      // Re-acquire wake lock (system may have released it while backgrounded)
-      await acquireWakeLock();
-
-      // Re-render to ensure UI matches current state (banner still visible)
-      if (activeRoutine) {
-        renderPlayerUI(container, activeRoutine, activeEngine.getState());
-      }
-    }
+function getPausedBannerText() {
+  if (pauseReason === 'visibility') {
+    return 'Paused while screen was locked';
   }
+  return 'Paused';
 }
-
