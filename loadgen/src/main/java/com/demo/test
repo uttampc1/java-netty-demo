@@ -1,79 +1,310 @@
-  // Load cue defaults from settings
-  let cueSettings = { cueType: 'beep', countdownAnnounce: true, volume: 70 };
-  try {
-    const saved = await getMeta('cueDefaults');
-    if (saved) cueSettings = { ...cueSettings, ...saved };
-  } catch (err) {
-    console.warn('[Player] Could not load cue defaults, using fallback:', err);
-  }
-  
-  // Create the engine and cue manager
-  const engine = new SessionEngine(routine, { prepDuration: 3 });
-  const cues = new CueManager(cueSettings);
-  cues.unlock();  // ensure audio is unlocked (was already unlocked by Start button, but be defensive)
-  
-  activeEngine = engine;
-  activeCues = cues;
-  activeContainer = container;
-  
-  // Initial render with idle state
-  renderPlayerUI(container, routine, engine.getState());
-  
-  // Subscribe to engine events
-  const unsubTick = engine.on('tick', (state) => {
-    updateTimerOnly(container, state);
-    
-    // Fire countdown cue at integer seconds in last 3 seconds
-    if (!state.isPaused && state.timeRemaining >= 1 && state.timeRemaining <= 3) {
-      cues.cueCountdown(state.timeRemaining);
-    }
-  });
-  
-  const unsubPhase = engine.on('phaseChange', (data) => {
-    if (data.to === 'complete') return;  // handled by 'complete' event
-    
-    // Fire phase-start cue
-    const context = buildCueContext(data, routine);
-    cues.cuePhaseStart(data.to, context);
-    
-    renderPlayerUI(container, routine, data.state);
-  });
-  
-  const unsubComplete = engine.on('complete', (data) => {
-    cues.cueComplete();
-    renderCompletionScreen(container, routine, data);
-  });
-  
-  unsubscribers = [unsubTick, unsubPhase, unsubComplete];
-  
-  // Start the workout
-  engine.start();
+// src/db/store.js
+// ============================================================
+// SESSIONS (Step 2.6)
+// ============================================================
+
+import { generateId } from '../utils/id.js';
+
+/**
+ * Creates a new session record (status: 'in-progress' initially).
+ */
+export async function createSession({ routineId, routineTitle, totalExercises, totalSets }) {
+  const db = await getDB();
+  const session = {
+    id: generateId(),
+    routineId,
+    routineTitle,
+    startedAt: Date.now(),
+    completedAt: null,
+    status: 'in-progress',
+    totalElapsed: 0,
+    exercisesCompleted: 0,
+    totalExercises,
+    setsCompleted: 0,
+    totalSets,
+  };
+  await db.put(STORE_SESSIONS, session);
+  return session;
 }
 
 /**
- * Builds context for cues based on phase transition.
+ * Updates an existing session (e.g., to mark complete or incomplete).
  */
-function buildCueContext(phaseChangeData, routine) {
-  const state = phaseChangeData.state;
-  const exercise = state.currentExercise;
-  
-  // Detect "new exercise" — when transitioning from rest-exercise or from prep
-  const isNewExercise = phaseChangeData.from === 'rest-exercise' 
-    || phaseChangeData.from === 'prep'
-    || (phaseChangeData.from === 'idle' && phaseChangeData.to === 'prep');
-  
-  // For rest-exercise, look up the upcoming exercise name
-  let nextExerciseName = null;
-  if (phaseChangeData.to === 'rest-exercise' && state.currentExerciseIndex < routine.exercises.length - 1) {
-    nextExerciseName = routine.exercises[state.currentExerciseIndex + 1].name;
-  }
-  
-  return {
-    exercise,
-    set: state.currentSet,
-    totalSets: exercise ? exercise.sets : 0,
-    isNewExercise,
-    nextExerciseName,
-  };
+export async function updateSession(id, updates) {
+  const db = await getDB();
+  const existing = await db.get(STORE_SESSIONS, id);
+  if (!existing) throw new Error(`Session ${id} not found`);
+  const merged = { ...existing, ...updates };
+  await db.put(STORE_SESSIONS, merged);
+  return merged;
 }
 
+/**
+ * Deletes a session (used when user discards an incomplete workout).
+ */
+export async function deleteSession(id) {
+  const db = await getDB();
+  await db.delete(STORE_SESSIONS, id);
+}
+
+
+// add before enginer.start()
+  // Create session record
+  const totalSets = routine.exercises.reduce((sum, ex) => sum + (ex.sets || 1), 0);
+  try {
+    activeSession = await createSession({
+      routineId: routine.id,
+      routineTitle: routine.title,
+      totalExercises: routine.exercises.length,
+      totalSets,
+    });
+    console.log('[Player] Session started:', activeSession.id);
+  } catch (err) {
+    console.warn('[Player] Could not create session record:', err);
+    // Continue anyway — workout works without recording
+  }
+
+
+
+// repalce with
+const unsubComplete = engine.on('complete', async (data) => {
+    cues.cueComplete();
+    
+    // Finalize session record
+    if (activeSession) {
+      try {
+        // Last set just completed + last exercise just completed
+        activeSession.setsCompleted += 1;
+        activeSession.exercisesCompleted += 1;
+        
+        const finalized = await updateSession(activeSession.id, {
+          completedAt: Date.now(),
+          status: 'complete',
+          totalElapsed: data.totalElapsed,
+          exercisesCompleted: activeSession.exercisesCompleted,
+          setsCompleted: activeSession.setsCompleted,
+        });
+        activeSession = finalized;
+        console.log('[Player] Session saved (complete):', finalized);
+      } catch (err) {
+        console.warn('[Player] Could not save session:', err);
+      }
+    }
+    
+    renderCompletionScreen(container, routine, data);
+  });
+
+// repalce with
+ if (exitBtn) {
+    exitBtn.addEventListener('click', async () => {
+      // Pause while user decides
+      const wasPaused = activeEngine ? activeEngine.isPaused() : true;
+      if (activeEngine && !wasPaused) {
+        activeEngine.pause();
+        if (activeCues) activeCues.stop();
+      }
+      
+      // Capture progress for the prompt
+      const elapsed = activeEngine ? Math.floor(activeEngine.getState().totalElapsed) : 0;
+      const setsDone = activeSession ? activeSession.setsCompleted : 0;
+      const hasProgress = elapsed >= 5;  // worth asking only if at least 5 seconds in
+      
+      let exitDecision;
+      
+      if (hasProgress) {
+        // Three-way choice: Save partial / Discard / Keep going
+        const result = await showExitPrompt({ elapsed, setsDone });
+        exitDecision = result;
+      } else {
+        // No meaningful progress yet — simple confirm
+        const ok = await confirmModal({
+          title: 'Exit workout?',
+          message: 'You just started — exit anyway?',
+          confirmLabel: 'Exit',
+          cancelLabel: 'Keep going',
+          danger: true,
+        });
+        exitDecision = ok ? 'discard' : 'cancel';
+      }
+      
+      if (exitDecision === 'cancel') {
+        if (activeEngine && !wasPaused) {
+          activeEngine.resume();
+          renderPlayerUI(container, routine, activeEngine.getState());
+        }
+        return;
+      }
+      
+      if (exitDecision === 'save') {
+        // Save as incomplete
+        if (activeSession) {
+          try {
+            await updateSession(activeSession.id, {
+              completedAt: Date.now(),
+              status: 'incomplete',
+              totalElapsed: elapsed,
+              setsCompleted: setsDone,
+              exercisesCompleted: activeSession.exercisesCompleted,
+            });
+            console.log('[Player] Session saved (incomplete)');
+          } catch (err) {
+            console.warn('[Player] Could not save partial session:', err);
+          }
+        }
+      } else if (exitDecision === 'discard') {
+        // Delete the session record we created at start
+        if (activeSession) {
+          try {
+            await deleteSession(activeSession.id);
+            console.log('[Player] Session discarded');
+          } catch (err) {
+            console.warn('[Player] Could not delete session:', err);
+          }
+        }
+      }
+      
+      cleanupEngine();
+      router.navigate(`/routine/${routine.id}`);
+    });
+  }
+}
+
+// add this at end, player.js
+/**
+ * Three-way exit prompt: Save partial / Discard / Keep going.
+ * Returns 'save' | 'discard' | 'cancel'.
+ */
+async function showExitPrompt({ elapsed, setsDone }) {
+  const { openModal, closeModal } = await import('../components/modal.js');
+  
+  const minutes = Math.floor(elapsed / 60);
+  const seconds = elapsed % 60;
+  const timeLabel = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+  
+  return new Promise((resolve) => {
+    const content = document.createElement('div');
+    content.className = 'exit-prompt';
+    content.innerHTML = `
+      <p class="exit-prompt-intro">
+        You've been working out for <strong>${timeLabel}</strong>${setsDone > 0 ? ` and completed <strong>${setsDone} set${setsDone === 1 ? '' : 's'}</strong>` : ''}.
+      </p>
+      
+      <p class="exit-prompt-question">What would you like to do?</p>
+      
+      <button type="button" class="import-action-btn" id="exit-save-btn">
+        <div class="import-action-content">
+          <div class="import-action-label">Save partial session</div>
+          <div class="import-action-hint">
+            Record your progress so far. You can pick up another time.
+          </div>
+        </div>
+      </button>
+      
+      <button type="button" class="import-action-btn" id="exit-discard-btn">
+        <div class="import-action-content">
+          <div class="import-action-label">Discard and exit</div>
+          <div class="import-action-hint">
+            Don't save anything. Your progress will be lost.
+          </div>
+        </div>
+      </button>
+      
+      <div class="editor-actions">
+        <button type="button" class="btn btn-secondary" id="exit-cancel-btn">Keep going</button>
+      </div>
+    `;
+    
+    const modal = openModal({
+      title: 'Exit workout?',
+      content,
+      dismissable: false,
+    });
+    
+    let resolved = false;
+    const finish = (decision) => {
+      if (resolved) return;
+      resolved = true;
+      closeModal(modal);
+      resolve(decision);
+    };
+    
+    content.querySelector('#exit-save-btn').addEventListener('click', () => finish('save'));
+    content.querySelector('#exit-discard-btn').addEventListener('click', () => finish('discard'));
+    content.querySelector('#exit-cancel-btn').addEventListener('click', () => finish('cancel'));
+  });
+}
+
+// replace ..
+function renderCompletionScreen(container, routine, completeData) {
+  const totalMinutes = Math.floor(completeData.totalElapsed / 60);
+  const totalSeconds = completeData.totalElapsed % 60;
+  const timeLabel = totalMinutes > 0
+    ? `${totalMinutes}m ${totalSeconds}s`
+    : `${totalSeconds}s`;
+  
+  const totalSets = routine.exercises.reduce((sum, ex) => sum + (ex.sets || 1), 0);
+  
+  container.innerHTML = `
+    <div class="player player-complete" data-phase="complete">
+      <div class="player-main">
+        <div class="player-complete-icon">🎉</div>
+        <div class="player-complete-title">Workout Complete!</div>
+        <div class="player-complete-routine">${escapeHtml(routine.title)}</div>
+        
+        <div class="player-complete-stats">
+          <div class="player-complete-stat">
+            <div class="player-complete-stat-value">${timeLabel}</div>
+            <div class="player-complete-stat-label">Total Time</div>
+          </div>
+          <div class="player-complete-stat">
+            <div class="player-complete-stat-value">${routine.exercises.length}</div>
+            <div class="player-complete-stat-label">Exercise${routine.exercises.length === 1 ? '' : 's'}</div>
+          </div>
+          <div class="player-complete-stat">
+            <div class="player-complete-stat-value">${totalSets}</div>
+            <div class="player-complete-stat-label">Set${totalSets === 1 ? '' : 's'}</div>
+          </div>
+        </div>
+        
+        <div class="player-complete-note muted">
+          Session saved to history.
+        </div>
+      </div>
+      
+      <div class="player-controls">
+        <button type="button" class="player-control-btn player-exit-btn" id="player-complete-done">
+          <span class="player-control-icon">✓</span>
+          <span class="player-control-label">Done</span>
+        </button>
+      </div>
+    </div>
+  `;
+  
+  container.querySelector('#player-complete-done').addEventListener('click', () => {
+    cleanupEngine();
+    router.navigate(`/routine/${routine.id}`);
+  });
+}
+
+// style.css
+/* === Step 2.6 — Exit Prompt === */
+
+.exit-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.exit-prompt-intro {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.exit-prompt-question {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+}
