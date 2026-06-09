@@ -3,3 +3,192 @@ ffmpeg -f lavfi -i color=c=black:s=320x240:d=60 \
        -af "volume=0.0005" \
        -c:v libx264 -pix_fmt yuv420p -c:a aac -b:a 96k -shortest \
        -movflags +faststart video_realaudio.mp4
+
+ffmpeg -f lavfi -i color=c=black:s=320x240:d=60 \
+       -f lavfi -i "sine=frequency=200:duration=60" \
+       -af "volume=0.0005" \
+       -c:v libx264 -pix_fmt yuv420p -c:a aac -b:a 96k -shortest \
+       -movflags +faststart keepawake.mp4
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Keep Awake Test</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      padding: 24px; padding-top: env(safe-area-inset-top, 24px);
+      background: #f5f5f5; color: #222; min-height: 100vh;
+    }
+    h1 { font-size: 22px; margin-bottom: 16px; }
+
+    .status {
+      font-size: 18px; font-weight: 700; text-align: center;
+      padding: 18px; border-radius: 10px; margin: 16px 0;
+      background: #e8eaed; color: #555;
+    }
+    .status.playing { background: #e8f5e9; color: #2e7d32; }
+
+    .timer {
+      font-size: 52px; font-weight: 300; text-align: center;
+      font-variant-numeric: tabular-nums; margin: 16px 0;
+    }
+
+    button {
+      display: block; width: 100%; padding: 18px;
+      font-size: 18px; font-weight: 700; border: none; border-radius: 10px;
+      cursor: pointer; margin-bottom: 12px; -webkit-tap-highlight-color: transparent;
+    }
+    .btn-go { background: #34c759; color: white; }
+    .btn-stop { background: #ff3b30; color: white; }
+
+    .card {
+      background: white; padding: 16px; border-radius: 10px;
+      margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      font-size: 13px; line-height: 1.5; color: #555;
+    }
+    .card strong { color: #222; }
+
+    .log {
+      background: white; padding: 12px; border-radius: 8px;
+      font-family: ui-monospace, monospace; font-size: 11px;
+      max-height: 200px; overflow-y: auto; white-space: pre-wrap; margin-top: 12px;
+    }
+
+    /* Video — visible small (red box) so you can confirm it's playing.
+       Tap "Hide" to shrink it to 2px. */
+    #player {
+      position: fixed; bottom: 10px; right: 10px;
+      width: 56px; height: 56px;
+      border: 2px solid red; border-radius: 8px;
+      z-index: 1000; background: #000; object-fit: cover;
+    }
+    body.hidden-video #player {
+      width: 2px; height: 2px; opacity: 0.01; border: none;
+    }
+  </style>
+</head>
+<body>
+  <h1>🎬 Keep Awake Test</h1>
+
+  <div class="card">
+    <strong>The recipe:</strong> hidden video, <strong>not muted</strong>,
+    with real but inaudible audio (sine @ volume 0.0005).
+    <br><br>
+    <strong>To test:</strong> tap Start, lower physical volume
+    (it should be inaudible), set the phone down, wait past your auto-lock time.
+    Screen should stay ON. Make sure the phone is <strong>not fully muted</strong>
+    (no mute symbol).
+  </div>
+
+  <div class="status" id="status">Stopped</div>
+  <div class="timer" id="timer">00:00</div>
+
+  <button class="btn-go" id="go-btn">▶ Start (keep-awake video)</button>
+  <button class="btn-stop" id="stop-btn" style="display:none;">⏹ Stop</button>
+  <button style="background:#e5e5e5;color:#333;" id="hide-btn">👁 Hide / Show video box</button>
+
+  <div class="log" id="log">Ready…</div>
+
+  <video id="player" loop playsinline></video>
+
+  <script>
+    const player  = document.getElementById('player');
+    const statusEl = document.getElementById('status');
+    const timerEl  = document.getElementById('timer');
+    const logEl    = document.getElementById('log');
+    const goBtn    = document.getElementById('go-btn');
+    const stopBtn  = document.getElementById('stop-btn');
+    const hideBtn  = document.getElementById('hide-btn');
+
+    let startTime = null;
+    let timerInterval = null;
+    let lastVisible = Date.now();
+
+    function log(msg) {
+      const t = new Date().toLocaleTimeString();
+      logEl.textContent = `[${t}] ${msg}\n` + logEl.textContent;
+    }
+
+    function updateTimer() {
+      if (!startTime) return;
+      const e = Math.floor((Date.now() - startTime) / 1000);
+      timerEl.textContent =
+        `${String(Math.floor(e/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`;
+    }
+
+    async function start() {
+      try {
+        player.src = 'keepawake.mp4';
+        player.loop = true;
+        player.muted = false;   // CRITICAL: must NOT be muted
+        player.volume = 1.0;    // element volume up; the FILE is near-silent
+
+        await player.play();
+
+        startTime = Date.now();
+        timerInterval = setInterval(updateTimer, 250);
+        statusEl.textContent = '🎬 Video playing — screen should stay ON';
+        statusEl.className = 'status playing';
+        goBtn.style.display = 'none';
+        stopBtn.style.display = 'block';
+
+        log(`▶ Playing keepawake.mp4`);
+        log(`   muted=${player.muted}, volume=${player.volume}, paused=${player.paused}`);
+      } catch (err) {
+        log(`❌ Play failed: ${err.message}`);
+        log(`   (Is keepawake.mp4 present?)`);
+        statusEl.textContent = '❌ Could not play video';
+      }
+    }
+
+    function stop() {
+      player.pause();
+      player.currentTime = 0;
+      clearInterval(timerInterval);
+      startTime = null;
+      timerEl.textContent = '00:00';
+      statusEl.textContent = 'Stopped';
+      statusEl.className = 'status';
+      goBtn.style.display = 'block';
+      stopBtn.style.display = 'none';
+      log('⏹ Stopped');
+    }
+
+    goBtn.addEventListener('click', start);
+    stopBtn.addEventListener('click', stop);
+    hideBtn.addEventListener('click', () => {
+      document.body.classList.toggle('hidden-video');
+      log(document.body.classList.contains('hidden-video')
+        ? '👁 Video box hidden (2px)' : '👁 Video box visible (56px)');
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        log('📵 Page hidden (screen locked / backgrounded)');
+      } else {
+        const h = Math.floor((Date.now() - lastVisible) / 1000);
+        log(`📱 Page visible (was hidden ~${h}s)`);
+        log(`   paused=${player.paused}, muted=${player.muted}`);
+      }
+      lastVisible = Date.now();
+    });
+
+    player.addEventListener('pause', () => { if (startTime) log('⚠️ Video PAUSED (by iOS?)'); });
+    player.addEventListener('ended', () => log('⚠️ ENDED (should loop!)'));
+    player.addEventListener('error', () => log(`❌ Video error: ${player.error?.message || 'unknown'}`));
+    player.addEventListener('loadedmetadata', () => {
+      log(`📂 Loaded: ${player.videoWidth}x${player.videoHeight}, ${player.duration.toFixed(1)}s`);
+    });
+
+    log(`UA: ${navigator.userAgent.slice(0, 60)}...`);
+    log(`Standalone: ${navigator.standalone || window.matchMedia('(display-mode: standalone)').matches}`);
+    log('Tap Start, lower volume (not muted), pocket the phone, wait.');
+  </script>
+</body>
+</html>
