@@ -1,109 +1,350 @@
-/**
- * HoldOn — Platform Detection
- * 
- * Returns the user's platform for showing platform-specific UI/instructions.
- * Uses navigator.userAgent + a few quirks (iPadOS 13+ pretends to be Mac).
- * 
- * Returns one of: 'ios' | 'android' | 'desktop'
- * 
- * Note: This is "good enough" detection, not bulletproof. Edge cases:
- * - iPadOS 13+ reports as MacIntel by default → detected via touch support
- * - User agent can be spoofed
- * - Some browsers randomize UA (Brave, DuckDuckGo)
- */
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="AudioWake">
+  <title>Audio Wake Lock Test</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      padding: 20px;
+      padding-top: env(safe-area-inset-top, 20px);
+      background: #f5f5f5;
+      color: #222;
+      min-height: 100vh;
+    }
+    h1 { font-size: 22px; margin-bottom: 6px; }
+    .sub { font-size: 13px; color: #666; margin-bottom: 16px; }
 
-let cachedPlatform = null;
+    .status {
+      font-size: 18px; font-weight: 700; text-align: center;
+      padding: 16px; border-radius: 10px; margin: 14px 0;
+      background: #e8eaed; color: #555;
+    }
+    .status.playing { background: #e8f5e9; color: #2e7d32; }
 
-/**
- * Returns 'ios', 'android', or 'desktop'.
- * Result is cached after first call (platform doesn't change at runtime).
- */
-export function getPlatform() {
-  if (cachedPlatform) return cachedPlatform;
-  
-  if (typeof navigator === 'undefined') {
-    cachedPlatform = 'desktop';
-    return cachedPlatform;
-  }
-  
-  const ua = navigator.userAgent || '';
-  const platform = navigator.platform || '';
-  
-  // iOS detection (iPhone, iPod, iPad on older iOS)
-  if (/iPhone|iPod/.test(ua)) {
-    cachedPlatform = 'ios';
-    return cachedPlatform;
-  }
-  
-  // iPad on iOS 12 and earlier
-  if (/iPad/.test(ua)) {
-    cachedPlatform = 'ios';
-    return cachedPlatform;
-  }
-  
-  // iPad on iPadOS 13+ — reports as MacIntel but has touch support
-  // This is the tricky one: Apple decided iPads should look like Macs in UA
-  if (platform === 'MacIntel' && navigator.maxTouchPoints > 1) {
-    cachedPlatform = 'ios';
-    return cachedPlatform;
-  }
-  
-  // Android detection
-  if (/Android/.test(ua)) {
-    cachedPlatform = 'android';
-    return cachedPlatform;
-  }
-  
-  // Default: desktop (Windows, Mac, Linux, ChromeOS)
-  cachedPlatform = 'desktop';
-  return cachedPlatform;
-}
+    .timer {
+      font-size: 44px; font-weight: 300; text-align: center;
+      font-variant-numeric: tabular-nums; margin: 10px 0;
+    }
 
-/**
- * Convenience: returns true if running on iOS (iPhone or iPad).
- */
-export function isIOS() {
-  return getPlatform() === 'ios';
-}
+    .control-card {
+      background: white; padding: 16px; border-radius: 10px;
+      margin-bottom: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .control-card h3 { font-size: 15px; margin-bottom: 12px; }
 
-/**
- * Convenience: returns true if running on Android.
- */
-export function isAndroid() {
-  return getPlatform() === 'android';
-}
+    label { display:block; font-size: 13px; color:#444; margin-bottom: 6px; }
 
-/**
- * Convenience: returns true if running on desktop (Windows/Mac/Linux/ChromeOS).
- */
-export function isDesktop() {
-  return getPlatform() === 'desktop';
-}
+    input[type="range"] { width: 100%; height: 36px; }
 
-/**
- * Returns true if running as an installed PWA (standalone display mode).
- * Useful for showing different UI in "installed" vs "browser" contexts.
- */
-export function isStandalone() {
-  if (typeof window === 'undefined') return false;
-  
-  // Standard PWA detection
-  if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) {
-    return true;
-  }
-  
-  // iOS Safari uses navigator.standalone (non-standard)
-  if (navigator.standalone === true) {
-    return true;
-  }
-  
-  return false;
-}
+    .vol-readout {
+      font-family: ui-monospace, monospace; font-size: 14px;
+      text-align: center; margin: 6px 0; color:#007aff; font-weight:700;
+    }
 
-/**
- * For testing: resets the cached platform (so getPlatform() recomputes).
- * Don't use in production code.
- */
-export function _resetPlatformCache() {
-  cachedPlatform = null;
-}
+    .source-row { display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+    .source-btn {
+      flex:1; min-width: 90px; padding:10px; border:2px solid #ddd;
+      border-radius:8px; background:white; font-size:13px; font-weight:600;
+      cursor:pointer; -webkit-tap-highlight-color:transparent;
+    }
+    .source-btn.selected { border-color:#007aff; background:#e8f4ff; color:#007aff; }
+
+    button.action {
+      display:block; width:100%; padding:16px; font-size:18px; font-weight:700;
+      border:none; border-radius:10px; cursor:pointer; margin-bottom:10px;
+      -webkit-tap-highlight-color:transparent;
+    }
+    .btn-go { background:#34c759; color:white; }
+    .btn-stop { background:#ff3b30; color:white; }
+
+    .preset-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .preset-btn {
+      padding:12px 8px; border:1px solid #ccc; border-radius:8px;
+      background:white; font-size:12px; font-weight:600; cursor:pointer;
+      -webkit-tap-highlight-color:transparent; text-align:center;
+    }
+
+    .log {
+      background:white; padding:12px; border-radius:8px;
+      font-family:ui-monospace, monospace; font-size:11px;
+      max-height:220px; overflow-y:auto; white-space:pre-wrap; margin-top:8px;
+    }
+    .hint { font-size:12px; color:#888; margin-top:4px; line-height:1.4; }
+  </style>
+</head>
+<body>
+  <h1>🔊 Audio Wake Test</h1>
+  <div class="sub">Goal: find the lowest-cost audio that keeps the screen on.</div>
+
+  <div class="status" id="status">Stopped</div>
+  <div class="timer" id="timer">00:00</div>
+
+  <!-- Audio source selection -->
+  <div class="control-card">
+    <h3>1. Audio Source</h3>
+    <div class="source-row">
+      <button class="source-btn selected" data-source="sine440">Tone 440Hz</button>
+      <button class="source-btn" data-source="sine10">Sub-bass 10Hz</button>
+      <button class="source-btn" data-source="noise">White Noise</button>
+    </div>
+    <div class="hint" id="source-hint">
+      Tone 440Hz: audible musical note. Use very low app volume to keep inaudible.
+    </div>
+  </div>
+
+  <!-- App volume control -->
+  <div class="control-card">
+    <h3>2. App Volume (independent of physical buttons)</h3>
+    <label>Drag to set the app's output gain</label>
+    <input type="range" id="volume" min="0" max="1000" value="500">
+    <div class="vol-readout" id="vol-readout">gain = 0.5000</div>
+    <div class="hint">
+      0 = true silence (likely fails). Lowest non-zero = the value we want to validate.
+      Use the presets below for exact values.
+    </div>
+  </div>
+
+  <!-- Quick presets for exact gain values -->
+  <div class="control-card">
+    <h3>3. Quick Gain Presets</h3>
+    <div class="preset-grid">
+      <button class="preset-btn" data-gain="0">0 (true silence)</button>
+      <button class="preset-btn" data-gain="0.0001">0.0001 (near-silent)</button>
+      <button class="preset-btn" data-gain="0.001">0.001 (very quiet)</button>
+      <button class="preset-btn" data-gain="0.01">0.01 (quiet)</button>
+      <button class="preset-btn" data-gain="0.1">0.1 (low)</button>
+      <button class="preset-btn" data-gain="0.5">0.5 (medium)</button>
+    </div>
+  </div>
+
+  <!-- Start/stop -->
+  <button class="action btn-go" id="go-btn">▶ Start Audio (90s timer)</button>
+  <button class="action btn-stop" id="stop-btn" style="display:none;">⏹ Stop</button>
+
+  <!-- Test guidance -->
+  <div class="control-card">
+    <h3>📋 Test Procedure</h3>
+    <div class="hint">
+      1. Pick a source + gain<br>
+      2. Tap Start, set phone down (or pocket), don't touch<br>
+      3. Wait past your auto-lock time (Settings → Display → Auto-Lock)<br>
+      4. Note whether screen stayed on<br>
+      5. Try with physical volume up/down, and silent switch on/off<br>
+      <br>
+      <strong>Listen:</strong> if you can hear it, the gain is too high for real use.
+    </div>
+  </div>
+
+  <div class="log" id="log">Ready…</div>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const timerEl = document.getElementById('timer');
+    const logEl = document.getElementById('log');
+    const volSlider = document.getElementById('volume');
+    const volReadout = document.getElementById('vol-readout');
+    const goBtn = document.getElementById('go-btn');
+    const stopBtn = document.getElementById('stop-btn');
+    const sourceHint = document.getElementById('source-hint');
+
+    let audioContext = null;
+    let sourceNode = null;
+    let gainNode = null;
+    let noiseBuffer = null;
+
+    let selectedSource = 'sine440';
+    let currentGain = 0.5;
+
+    let startTime = null;
+    let timerInterval = null;
+    let lastVisible = Date.now();
+
+    function log(msg) {
+      const t = new Date().toLocaleTimeString();
+      logEl.textContent = `[${t}] ${msg}\n` + logEl.textContent;
+    }
+
+    function sliderToGain(v) {
+      // Map 0..1000 slider to 0..1 gain with finer control at low end (exponential)
+      const norm = v / 1000;
+      if (norm === 0) return 0;
+      // exponential curve: more resolution near zero
+      return Math.pow(norm, 3); // 0.5 slider → 0.125 gain
+    }
+
+    function updateVolReadout() {
+      volReadout.textContent = `gain = ${currentGain.toFixed(4)}`;
+    }
+
+    // Source selection
+    document.querySelectorAll('.source-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.source-btn').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+        selectedSource = btn.dataset.source;
+        const hints = {
+          sine440: 'Tone 440Hz: audible musical note. Use very low app volume to keep inaudible.',
+          sine10: 'Sub-bass 10Hz: below human hearing. May be filtered by some speakers.',
+          noise: 'White noise: broadband. Most "audio-like" signal for iOS.'
+        };
+        sourceHint.textContent = hints[selectedSource];
+        log(`Source: ${selectedSource}`);
+        // If currently playing, restart with new source
+        if (sourceNode) { restart(); }
+      });
+    });
+
+    // Volume slider
+    volSlider.addEventListener('input', () => {
+      currentGain = sliderToGain(parseInt(volSlider.value, 10));
+      updateVolReadout();
+      if (gainNode) gainNode.gain.value = currentGain;
+    });
+
+    // Gain presets
+    document.querySelectorAll('.preset-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentGain = parseFloat(btn.dataset.gain);
+        updateVolReadout();
+        if (gainNode) gainNode.gain.value = currentGain;
+        log(`Preset gain = ${currentGain}`);
+      });
+    });
+
+    function makeNoiseBuffer(ctx) {
+      const bufferSize = ctx.sampleRate * 2; // 2 seconds
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
+      return buffer;
+    }
+
+    function buildSource(ctx) {
+      if (selectedSource === 'noise') {
+        const node = ctx.createBufferSource();
+        if (!noiseBuffer) noiseBuffer = makeNoiseBuffer(ctx);
+        node.buffer = noiseBuffer;
+        node.loop = true;
+        return node;
+      } else {
+        const node = ctx.createOscillator();
+        node.type = 'sine';
+        node.frequency.value = (selectedSource === 'sine10') ? 10 : 440;
+        return node;
+      }
+    }
+
+    async function start() {
+      try {
+        if (!audioContext) {
+          const Ctx = window.AudioContext || window.webkitAudioContext;
+          audioContext = new Ctx();
+        }
+        if (audioContext.state === 'suspended') {
+          await audioContext.resume();
+        }
+
+        gainNode = audioContext.createGain();
+        gainNode.gain.value = currentGain;
+
+        sourceNode = buildSource(audioContext);
+        sourceNode.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        sourceNode.start();
+
+        startTime = Date.now();
+        timerInterval = setInterval(updateTimer, 250);
+
+        statusEl.textContent = `🎵 Playing: ${selectedSource} @ gain ${currentGain.toFixed(4)}`;
+        statusEl.className = 'status playing';
+        goBtn.style.display = 'none';
+        stopBtn.style.display = 'block';
+
+        log(`▶ Started: ${selectedSource}, gain=${currentGain.toFixed(4)}, ctx=${audioContext.state}`);
+      } catch (err) {
+        log(`❌ start failed: ${err.message}`);
+      }
+    }
+
+    function stop() {
+      if (sourceNode) {
+        try { sourceNode.stop(); } catch (e) {}
+        sourceNode.disconnect();
+        sourceNode = null;
+      }
+      if (gainNode) { gainNode.disconnect(); gainNode = null; }
+      clearInterval(timerInterval);
+      startTime = null;
+      timerEl.textContent = '00:00';
+      statusEl.textContent = 'Stopped';
+      statusEl.className = 'status';
+      goBtn.style.display = 'block';
+      stopBtn.style.display = 'none';
+      log('⏹ Stopped');
+    }
+
+    function restart() {
+      log('🔄 Restarting with new source/gain');
+      const wasPlaying = !!sourceNode;
+      if (sourceNode) {
+        try { sourceNode.stop(); } catch(e){}
+        sourceNode.disconnect();
+        sourceNode = null;
+      }
+      if (wasPlaying && audioContext) {
+        gainNode = audioContext.createGain();
+        gainNode.gain.value = currentGain;
+        sourceNode = buildSource(audioContext);
+        sourceNode.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        sourceNode.start();
+        statusEl.textContent = `🎵 Playing: ${selectedSource} @ gain ${currentGain.toFixed(4)}`;
+      }
+    }
+
+    function updateTimer() {
+      if (!startTime) return;
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      const m = Math.floor(elapsed / 60);
+      const s = elapsed % 60;
+      timerEl.textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+
+      // Optional: auto-stop at 90s to save battery if you forget
+      if (elapsed >= 90) {
+        log('⏱ Reached 90s — auto-stopping');
+        stop();
+      }
+    }
+
+    // Visibility tracking — tells us if iOS suspended the page
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        log('📵 Page hidden (screen locked or app backgrounded)');
+      } else {
+        const hidden = Math.floor((Date.now() - lastVisible) / 1000);
+        log(`📱 Page visible (was hidden ~${hidden}s)`);
+        log(`   audio ctx state: ${audioContext ? audioContext.state : 'none'}`);
+        log(`   source playing: ${!!sourceNode}`);
+      }
+      lastVisible = Date.now();
+    });
+
+    goBtn.addEventListener('click', start);
+    stopBtn.addEventListener('click', stop);
+
+    // Init
+    currentGain = sliderToGain(parseInt(volSlider.value, 10));
+    updateVolReadout();
+    log(`UA: ${navigator.userAgent.slice(0, 60)}...`);
+    log(`Standalone: ${navigator.standalone || window.matchMedia('(display-mode: standalone)').matches}`);
+  </script>
+</body>
+</html>
