@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="AudioWake">
-  <title>Audio Wake Lock Test</title>
+  <meta name="apple-mobile-web-app-title" content="AudioElemTest">
+  <title>Audio Element Wake Test</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -18,10 +18,10 @@
       min-height: 100vh;
     }
     h1 { font-size: 22px; margin-bottom: 6px; }
-    .sub { font-size: 13px; color: #666; margin-bottom: 16px; }
+    .sub { font-size: 13px; color: #666; margin-bottom: 16px; line-height: 1.4; }
 
     .status {
-      font-size: 18px; font-weight: 700; text-align: center;
+      font-size: 17px; font-weight: 700; text-align: center;
       padding: 16px; border-radius: 10px; margin: 14px 0;
       background: #e8eaed; color: #555;
     }
@@ -32,282 +32,133 @@
       font-variant-numeric: tabular-nums; margin: 10px 0;
     }
 
-    .control-card {
+    .test-card {
       background: white; padding: 16px; border-radius: 10px;
-      margin-bottom: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
-    .control-card h3 { font-size: 15px; margin-bottom: 12px; }
+    .test-card h3 { font-size: 15px; margin-bottom: 6px; }
+    .test-card p { font-size: 12px; color: #666; margin-bottom: 12px; line-height: 1.4; }
 
-    label { display:block; font-size: 13px; color:#444; margin-bottom: 6px; }
+    .file-btn {
+      display: block; width: 100%; padding: 14px;
+      font-size: 15px; font-weight: 600;
+      border: 2px solid #007aff; border-radius: 8px;
+      background: white; color: #007aff;
+      cursor: pointer; -webkit-tap-highlight-color: transparent;
+      margin-bottom: 8px;
+    }
+    .file-btn.playing { background: #007aff; color: white; }
 
+    .vol-control { margin-top: 12px; }
+    .vol-control label { font-size: 13px; color: #444; display: block; margin-bottom: 6px; }
     input[type="range"] { width: 100%; height: 36px; }
-
     .vol-readout {
       font-family: ui-monospace, monospace; font-size: 14px;
-      text-align: center; margin: 6px 0; color:#007aff; font-weight:700;
+      text-align: center; color: #007aff; font-weight: 700; margin-top: 4px;
     }
 
-    .source-row { display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
-    .source-btn {
-      flex:1; min-width: 90px; padding:10px; border:2px solid #ddd;
-      border-radius:8px; background:white; font-size:13px; font-weight:600;
-      cursor:pointer; -webkit-tap-highlight-color:transparent;
-    }
-    .source-btn.selected { border-color:#007aff; background:#e8f4ff; color:#007aff; }
-
-    button.action {
-      display:block; width:100%; padding:16px; font-size:18px; font-weight:700;
-      border:none; border-radius:10px; cursor:pointer; margin-bottom:10px;
-      -webkit-tap-highlight-color:transparent;
-    }
-    .btn-go { background:#34c759; color:white; }
-    .btn-stop { background:#ff3b30; color:white; }
-
-    .preset-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-    .preset-btn {
-      padding:12px 8px; border:1px solid #ccc; border-radius:8px;
-      background:white; font-size:12px; font-weight:600; cursor:pointer;
-      -webkit-tap-highlight-color:transparent; text-align:center;
+    .stop-all {
+      display: block; width: 100%; padding: 16px;
+      font-size: 17px; font-weight: 700;
+      background: #ff3b30; color: white;
+      border: none; border-radius: 10px;
+      cursor: pointer; margin: 12px 0;
+      -webkit-tap-highlight-color: transparent;
     }
 
     .log {
-      background:white; padding:12px; border-radius:8px;
-      font-family:ui-monospace, monospace; font-size:11px;
-      max-height:220px; overflow-y:auto; white-space:pre-wrap; margin-top:8px;
+      background: white; padding: 12px; border-radius: 8px;
+      font-family: ui-monospace, monospace; font-size: 11px;
+      max-height: 220px; overflow-y: auto; white-space: pre-wrap; margin-top: 12px;
     }
-    .hint { font-size:12px; color:#888; margin-top:4px; line-height:1.4; }
+    .hint { font-size: 12px; color: #888; margin-top: 8px; line-height: 1.4; }
+    .warn { color: #d97706; font-weight: 600; }
   </style>
 </head>
 <body>
-  <h1>🔊 Audio Wake Test</h1>
-  <div class="sub">Goal: find the lowest-cost audio that keeps the screen on.</div>
+  <h1>🔊 Audio Element Wake Test</h1>
+  <div class="sub">
+    Tests <code>&lt;audio&gt;</code> elements (playback category) — the method YouTube uses.
+    Unlike Web Audio API (ambient category), these should keep the screen on.
+  </div>
 
   <div class="status" id="status">Stopped</div>
   <div class="timer" id="timer">00:00</div>
 
-  <!-- Audio source selection -->
-  <div class="control-card">
-    <h3>1. Audio Source</h3>
-    <div class="source-row">
-      <button class="source-btn selected" data-source="sine440">Tone 440Hz</button>
-      <button class="source-btn" data-source="sine10">Sub-bass 10Hz</button>
-      <button class="source-btn" data-source="noise">White Noise</button>
-    </div>
-    <div class="hint" id="source-hint">
-      Tone 440Hz: audible musical note. Use very low app volume to keep inaudible.
-    </div>
+  <!-- Silent file test -->
+  <div class="test-card">
+    <h3>🔇 Silent File</h3>
+    <p>Digital silence as an &lt;audio&gt; element. If THIS keeps the screen on, it's the perfect solution — inaudible AND keeps screen awake.</p>
+    <button class="file-btn" data-file="silent.m4a">▶ Play silent.m4a</button>
   </div>
 
-  <!-- App volume control -->
-  <div class="control-card">
-    <h3>2. App Volume (independent of physical buttons)</h3>
-    <label>Drag to set the app's output gain</label>
-    <input type="range" id="volume" min="0" max="1000" value="500">
-    <div class="vol-readout" id="vol-readout">gain = 0.5000</div>
+  <!-- Near-silent file test -->
+  <div class="test-card">
+    <h3>🔉 Near-Silent File</h3>
+    <p>Very quiet 440Hz tone (volume 0.01). Barely audible. Fallback if pure silence doesn't work.</p>
+    <button class="file-btn" data-file="quiet.m4a">▶ Play quiet.m4a</button>
+  </div>
+
+  <!-- Audible control test -->
+  <div class="test-card">
+    <h3>🔊 Audible File (Control)</h3>
+    <p>Clear 440Hz tone. Control test — should definitely keep screen on if the method works at all.</p>
+    <button class="file-btn" data-file="audible.m4a">▶ Play audible.m4a</button>
+  </div>
+
+  <!-- Volume control -->
+  <div class="test-card">
+    <h3>🎚️ App Volume (element.volume)</h3>
+    <p>Controls the &lt;audio&gt; element's volume property (0 to 1). Physical buttons override this.</p>
+    <div class="vol-control">
+      <input type="range" id="volume" min="0" max="100" value="100">
+      <div class="vol-readout" id="vol-readout">volume = 1.00</div>
+    </div>
     <div class="hint">
-      0 = true silence (likely fails). Lowest non-zero = the value we want to validate.
-      Use the presets below for exact values.
+      Note: <code>volume = 0</code> is like muting via app. Earlier we found app-mute fails.
+      Try volume = 0.01 (lowest non-zero) to test the threshold.
     </div>
   </div>
 
-  <!-- Quick presets for exact gain values -->
-  <div class="control-card">
-    <h3>3. Quick Gain Presets</h3>
-    <div class="preset-grid">
-      <button class="preset-btn" data-gain="0">0 (true silence)</button>
-      <button class="preset-btn" data-gain="0.0001">0.0001 (near-silent)</button>
-      <button class="preset-btn" data-gain="0.001">0.001 (very quiet)</button>
-      <button class="preset-btn" data-gain="0.01">0.01 (quiet)</button>
-      <button class="preset-btn" data-gain="0.1">0.1 (low)</button>
-      <button class="preset-btn" data-gain="0.5">0.5 (medium)</button>
-    </div>
-  </div>
+  <button class="stop-all" id="stop-btn">⏹ Stop All</button>
 
-  <!-- Start/stop -->
-  <button class="action btn-go" id="go-btn">▶ Start Audio (90s timer)</button>
-  <button class="action btn-stop" id="stop-btn" style="display:none;">⏹ Stop</button>
-
-  <!-- Test guidance -->
-  <div class="control-card">
+  <!-- Test procedure -->
+  <div class="test-card">
     <h3>📋 Test Procedure</h3>
     <div class="hint">
-      1. Pick a source + gain<br>
-      2. Tap Start, set phone down (or pocket), don't touch<br>
-      3. Wait past your auto-lock time (Settings → Display → Auto-Lock)<br>
-      4. Note whether screen stayed on<br>
-      5. Try with physical volume up/down, and silent switch on/off<br>
+      1. Tap a file to play (it loops)<br>
+      2. Set phone down or pocket, don't touch<br>
+      3. Wait past auto-lock time<br>
+      4. Did screen stay on?<br>
       <br>
-      <strong>Listen:</strong> if you can hear it, the gain is too high for real use.
+      <span class="warn">Critical test:</span> Try "Silent File" with the
+      <span class="warn">silent switch ON</span>. If silent file + silent switch
+      keeps the screen on → we've solved it perfectly.
     </div>
   </div>
 
   <div class="log" id="log">Ready…</div>
 
+  <!-- Audio elements (created dynamically, but declaring for clarity) -->
+  <audio id="player" loop playsinline></audio>
+
   <script>
+    const player = document.getElementById('player');
     const statusEl = document.getElementById('status');
     const timerEl = document.getElementById('timer');
     const logEl = document.getElementById('log');
     const volSlider = document.getElementById('volume');
     const volReadout = document.getElementById('vol-readout');
-    const goBtn = document.getElementById('go-btn');
     const stopBtn = document.getElementById('stop-btn');
-    const sourceHint = document.getElementById('source-hint');
-
-    let audioContext = null;
-    let sourceNode = null;
-    let gainNode = null;
-    let noiseBuffer = null;
-
-    let selectedSource = 'sine440';
-    let currentGain = 0.5;
 
     let startTime = null;
     let timerInterval = null;
     let lastVisible = Date.now();
+    let currentFile = null;
 
     function log(msg) {
       const t = new Date().toLocaleTimeString();
       logEl.textContent = `[${t}] ${msg}\n` + logEl.textContent;
-    }
-
-    function sliderToGain(v) {
-      // Map 0..1000 slider to 0..1 gain with finer control at low end (exponential)
-      const norm = v / 1000;
-      if (norm === 0) return 0;
-      // exponential curve: more resolution near zero
-      return Math.pow(norm, 3); // 0.5 slider → 0.125 gain
-    }
-
-    function updateVolReadout() {
-      volReadout.textContent = `gain = ${currentGain.toFixed(4)}`;
-    }
-
-    // Source selection
-    document.querySelectorAll('.source-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.source-btn').forEach(b => b.classList.remove('selected'));
-        btn.classList.add('selected');
-        selectedSource = btn.dataset.source;
-        const hints = {
-          sine440: 'Tone 440Hz: audible musical note. Use very low app volume to keep inaudible.',
-          sine10: 'Sub-bass 10Hz: below human hearing. May be filtered by some speakers.',
-          noise: 'White noise: broadband. Most "audio-like" signal for iOS.'
-        };
-        sourceHint.textContent = hints[selectedSource];
-        log(`Source: ${selectedSource}`);
-        // If currently playing, restart with new source
-        if (sourceNode) { restart(); }
-      });
-    });
-
-    // Volume slider
-    volSlider.addEventListener('input', () => {
-      currentGain = sliderToGain(parseInt(volSlider.value, 10));
-      updateVolReadout();
-      if (gainNode) gainNode.gain.value = currentGain;
-    });
-
-    // Gain presets
-    document.querySelectorAll('.preset-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        currentGain = parseFloat(btn.dataset.gain);
-        updateVolReadout();
-        if (gainNode) gainNode.gain.value = currentGain;
-        log(`Preset gain = ${currentGain}`);
-      });
-    });
-
-    function makeNoiseBuffer(ctx) {
-      const bufferSize = ctx.sampleRate * 2; // 2 seconds
-      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) {
-        data[i] = Math.random() * 2 - 1;
-      }
-      return buffer;
-    }
-
-    function buildSource(ctx) {
-      if (selectedSource === 'noise') {
-        const node = ctx.createBufferSource();
-        if (!noiseBuffer) noiseBuffer = makeNoiseBuffer(ctx);
-        node.buffer = noiseBuffer;
-        node.loop = true;
-        return node;
-      } else {
-        const node = ctx.createOscillator();
-        node.type = 'sine';
-        node.frequency.value = (selectedSource === 'sine10') ? 10 : 440;
-        return node;
-      }
-    }
-
-    async function start() {
-      try {
-        if (!audioContext) {
-          const Ctx = window.AudioContext || window.webkitAudioContext;
-          audioContext = new Ctx();
-        }
-        if (audioContext.state === 'suspended') {
-          await audioContext.resume();
-        }
-
-        gainNode = audioContext.createGain();
-        gainNode.gain.value = currentGain;
-
-        sourceNode = buildSource(audioContext);
-        sourceNode.connect(gainNode);
-        gainNode.connect(audioContext.destination);
-        sourceNode.start();
-
-        startTime = Date.now();
-        timerInterval = setInterval(updateTimer, 250);
-
-        statusEl.textContent = `🎵 Playing: ${selectedSource} @ gain ${currentGain.toFixed(4)}`;
-        statusEl.className = 'status playing';
-        goBtn.style.display = 'none';
-        stopBtn.style.display = 'block';
-
-        log(`▶ Started: ${selectedSource}, gain=${currentGain.toFixed(4)}, ctx=${audioContext.state}`);
-      } catch (err) {
-        log(`❌ start failed: ${err.message}`);
-      }
-    }
-
-    function stop() {
-      if (sourceNode) {
-        try { sourceNode.stop(); } catch (e) {}
-        sourceNode.disconnect();
-        sourceNode = null;
-      }
-      if (gainNode) { gainNode.disconnect(); gainNode = null; }
-      clearInterval(timerInterval);
-      startTime = null;
-      timerEl.textContent = '00:00';
-      statusEl.textContent = 'Stopped';
-      statusEl.className = 'status';
-      goBtn.style.display = 'block';
-      stopBtn.style.display = 'none';
-      log('⏹ Stopped');
-    }
-
-    function restart() {
-      log('🔄 Restarting with new source/gain');
-      const wasPlaying = !!sourceNode;
-      if (sourceNode) {
-        try { sourceNode.stop(); } catch(e){}
-        sourceNode.disconnect();
-        sourceNode = null;
-      }
-      if (wasPlaying && audioContext) {
-        gainNode = audioContext.createGain();
-        gainNode.gain.value = currentGain;
-        sourceNode = buildSource(audioContext);
-        sourceNode.connect(gainNode);
-        gainNode.connect(audioContext.destination);
-        sourceNode.start();
-        statusEl.textContent = `🎵 Playing: ${selectedSource} @ gain ${currentGain.toFixed(4)}`;
-      }
     }
 
     function updateTimer() {
@@ -317,34 +168,108 @@
       const s = elapsed % 60;
       timerEl.textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
 
-      // Optional: auto-stop at 90s to save battery if you forget
-      if (elapsed >= 90) {
-        log('⏱ Reached 90s — auto-stopping');
-        stop();
+      // Auto-stop at 120s to save battery if forgotten
+      if (elapsed >= 120) {
+        log('⏱ Reached 120s — auto-stopping');
+        stopAll();
       }
     }
 
-    // Visibility tracking — tells us if iOS suspended the page
+    async function playFile(filename) {
+      try {
+        // Stop current if different file
+        if (currentFile && currentFile !== filename) {
+          player.pause();
+        }
+
+        currentFile = filename;
+        player.src = filename;
+        player.volume = parseInt(volSlider.value, 10) / 100;
+        player.loop = true;
+
+        await player.play();
+
+        if (!startTime) {
+          startTime = Date.now();
+          timerInterval = setInterval(updateTimer, 250);
+        }
+
+        statusEl.textContent = `🎵 Playing: ${filename} (vol ${player.volume.toFixed(2)})`;
+        statusEl.className = 'status playing';
+
+        // Update button states
+        document.querySelectorAll('.file-btn').forEach(b => {
+          b.classList.toggle('playing', b.dataset.file === filename);
+        });
+
+        log(`▶ Playing: ${filename}, volume=${player.volume.toFixed(2)}, loop=${player.loop}`);
+      } catch (err) {
+        log(`❌ Play failed: ${err.message}`);
+        log(`   (Is ${filename} present? Run the ffmpeg commands.)`);
+        statusEl.textContent = `❌ Could not play ${filename}`;
+        statusEl.className = 'status';
+      }
+    }
+
+    function stopAll() {
+      player.pause();
+      player.currentTime = 0;
+      currentFile = null;
+      clearInterval(timerInterval);
+      startTime = null;
+      timerEl.textContent = '00:00';
+      statusEl.textContent = 'Stopped';
+      statusEl.className = 'status';
+      document.querySelectorAll('.file-btn').forEach(b => b.classList.remove('playing'));
+      log('⏹ Stopped all');
+    }
+
+    // File buttons
+    document.querySelectorAll('.file-btn').forEach(btn => {
+      btn.addEventListener('click', () => playFile(btn.dataset.file));
+    });
+
+    // Volume slider
+    volSlider.addEventListener('input', () => {
+      const v = parseInt(volSlider.value, 10) / 100;
+      volReadout.textContent = `volume = ${v.toFixed(2)}`;
+      player.volume = v;
+      if (currentFile) {
+        log(`🎚️ Volume changed to ${v.toFixed(2)}`);
+      }
+    });
+
+    stopBtn.addEventListener('click', stopAll);
+
+    // Visibility tracking
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
-        log('📵 Page hidden (screen locked or app backgrounded)');
+        log('📵 Page hidden (screen locked / backgrounded)');
       } else {
         const hidden = Math.floor((Date.now() - lastVisible) / 1000);
         log(`📱 Page visible (was hidden ~${hidden}s)`);
-        log(`   audio ctx state: ${audioContext ? audioContext.state : 'none'}`);
-        log(`   source playing: ${!!sourceNode}`);
+        log(`   player paused: ${player.paused}, currentTime: ${player.currentTime.toFixed(1)}s`);
       }
       lastVisible = Date.now();
     });
 
-    goBtn.addEventListener('click', start);
-    stopBtn.addEventListener('click', stop);
+    // Player event tracking
+    player.addEventListener('pause', () => {
+      if (startTime) log('⚠️ Player PAUSED (by iOS?)');
+    });
+    player.addEventListener('play', () => log('▶ Player play event'));
+    player.addEventListener('ended', () => log('⚠️ Player ENDED (should loop!)'));
+    player.addEventListener('error', () => {
+      log(`❌ Player error: ${player.error?.message || 'unknown'}`);
+    });
+    player.addEventListener('loadedmetadata', () => {
+      log(`📂 Loaded: ${currentFile}, duration ${player.duration.toFixed(1)}s`);
+    });
 
     // Init
-    currentGain = sliderToGain(parseInt(volSlider.value, 10));
-    updateVolReadout();
     log(`UA: ${navigator.userAgent.slice(0, 60)}...`);
     log(`Standalone: ${navigator.standalone || window.matchMedia('(display-mode: standalone)').matches}`);
+    log('Tap a file button to begin testing.');
   </script>
 </body>
 </html>
