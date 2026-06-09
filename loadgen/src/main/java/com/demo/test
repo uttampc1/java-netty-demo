@@ -1,128 +1,118 @@
-// player.js
+// src/utils/routineDuration.js
+/**
+ * HoldOn — Routine Duration Calculator
+ * 
+ * Pure helpers for calculating and formatting expected workout duration.
+ * Used by the education dialog to show users how long a routine will take.
+ */
 
-import { getRoutine, getMeta, setMeta, createSession, updateSession, deleteSession } from '../db/store.js';
-
-
-
-// Show first-time education modal about screen lock behavior
-  try {
-    const educationShown = await getMeta('wakeLockEducationShown');
-    if (!educationShown) {
-      await showWakeLockEducation();
-      await setMeta('wakeLockEducationShown', true);
-    }
-  } catch (err) {
-    console.warn('[Player] Could not check/show education modal:', err);
-  }
-
+const DEFAULT_PREP_DURATION = 3;
 
 /**
- * Shows the one-time educational modal about screen lock behavior.
- * Returns a Promise that resolves when user dismisses.
+ * Calculates the total expected duration of a routine in seconds.
+ * Includes prep + all work phases + all rest phases.
+ * 
+ * @param {Object} routine - Routine object with exercises array
+ * @param {number} [prepDuration=3] - Prep countdown duration
+ * @returns {number} Total seconds
  */
-async function showWakeLockEducation() {
-  const { openModal, closeModal } = await import('../components/modal.js');
+export function calculateRoutineDuration(routine, prepDuration = DEFAULT_PREP_DURATION) {
+  if (!routine || !Array.isArray(routine.exercises) || routine.exercises.length === 0) {
+    return 0;
+  }
   
-  return new Promise((resolve) => {
-    const content = document.createElement('div');
-    content.className = 'wake-lock-education';
-    content.innerHTML = `
-      <div class="wake-lock-education-icon">📱</div>
-      
-      <p class="wake-lock-education-intro">
-        HoldOn will <strong>keep your screen on</strong> during workouts so you don't miss any cues.
-      </p>
-      
-      <div class="wake-lock-education-note">
-        <div class="wake-lock-education-note-title">⚠️ If you lock your screen</div>
-        <p>
-          Your workout will <strong>pause automatically</strong>. Audio cues can't play when your screen is locked (browser limitation).
-        </p>
-        <p>
-          Tap <strong>Resume</strong> when you unlock to continue.
-        </p>
-      </div>
-      
-      <div class="editor-actions">
-        <button type="button" class="btn btn-primary" id="education-ok-btn">Got it</button>
-      </div>
-    `;
+  let total = prepDuration;  // initial prep countdown
+  
+  routine.exercises.forEach((exercise) => {
+    const sets = Math.max(1, exercise.sets || 1);
+    const workDuration = Math.max(0, exercise.workDuration || 0);
+    const restBetweenSets = Math.max(0, exercise.restBetweenSets || 0);
     
-    const modal = openModal({
-      title: 'About Screen & Audio',
-      content,
-      dismissable: false,
-    });
+    // All work phases for this exercise
+    total += workDuration * sets;
     
-    content.querySelector('#education-ok-btn').addEventListener('click', () => {
-      closeModal(modal);
-      resolve();
-    });
+    // Rests between sets (one fewer rest than sets — no rest after final set)
+    if (sets > 1) {
+      total += restBetweenSets * (sets - 1);
+    }
   });
+  
+  // Rests between exercises (one fewer rest than exercises — no rest after final exercise)
+  const restBetweenExercises = Math.max(0, routine.restBetweenExercises || 0);
+  if (routine.exercises.length > 1) {
+    total += restBetweenExercises * (routine.exercises.length - 1);
+  }
+  
+  return total;
 }
 
-
-
-// add it to renderPlayerUI      
-<div class="player-hint">🔒 Locking the screen will pause this workout</div>
-
-
-// Styles
-/* === Step 2.7.C — Wake Lock Education + Hint === */
-
-/* Education modal */
-.wake-lock-education {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+/**
+ * Formats a duration in seconds to a human-friendly string.
+ * Examples:
+ *   45    → "45 seconds"
+ *   60    → "1 minute"
+ *   90    → "1 minute 30 seconds"
+ *   600   → "10 minutes"
+ *   863   → "14 minutes 23 seconds"
+ *   3600  → "1 hour"
+ *   3720  → "1 hour 2 minutes"
+ * 
+ * @param {number} seconds 
+ * @returns {string}
+ */
+export function formatDuration(seconds) {
+  if (!seconds || seconds < 0) return '0 seconds';
+  
+  seconds = Math.round(seconds);
+  
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  
+  const parts = [];
+  
+  if (hours > 0) {
+    parts.push(`${hours} hour${hours === 1 ? '' : 's'}`);
+  }
+  
+  if (minutes > 0) {
+    parts.push(`${minutes} minute${minutes === 1 ? '' : 's'}`);
+  }
+  
+  // Only show seconds if total < 1 hour AND there are nonzero seconds
+  // Avoids awkward "1 hour 2 minutes 15 seconds"
+  if (hours === 0 && secs > 0) {
+    parts.push(`${secs} second${secs === 1 ? '' : 's'}`);
+  }
+  
+  return parts.join(' ') || '0 seconds';
 }
 
-.wake-lock-education-icon {
-  font-size: 48px;
-  text-align: center;
-  margin-top: 4px;
-}
-
-.wake-lock-education-intro {
-  margin: 0;
-  font-size: 15px;
-  line-height: 1.5;
-  color: var(--text);
-  text-align: center;
-}
-
-.wake-lock-education-note {
-  background-color: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 14px 16px;
-}
-
-.wake-lock-education-note-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-  margin-bottom: 8px;
-}
-
-.wake-lock-education-note p {
-  margin: 0 0 8px 0;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--text-muted);
-}
-
-.wake-lock-education-note p:last-child {
-  margin-bottom: 0;
-}
-
-/* Persistent hint at bottom of player */
-.player-hint {
-  flex-shrink: 0;
-  padding: 8px 20px 12px;
-  text-align: center;
-  font-size: 11px;
-  color: var(--text-muted);
-  opacity: 0.7;
-  letter-spacing: 0.02em;
+/**
+ * Returns a compact form for tight UI spaces.
+ * Examples:
+ *   45    → "45s"
+ *   60    → "1m"
+ *   90    → "1m 30s"
+ *   3720  → "1h 2m"
+ * 
+ * @param {number} seconds 
+ * @returns {string}
+ */
+export function formatDurationCompact(seconds) {
+  if (!seconds || seconds < 0) return '0s';
+  
+  seconds = Math.round(seconds);
+  
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  
+  const parts = [];
+  
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0) parts.push(`${minutes}m`);
+  if (hours === 0 && secs > 0) parts.push(`${secs}s`);
+  
+  return parts.join(' ') || '0s';
 }
