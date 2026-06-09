@@ -1,118 +1,88 @@
-// src/utils/routineDuration.js
-/**
- * HoldOn — Routine Duration Calculator
- * 
- * Pure helpers for calculating and formatting expected workout duration.
- * Used by the education dialog to show users how long a routine will take.
- */
+const { calculateRoutineDuration, formatDuration } = await import('/src/utils/routineDuration.js')
 
-const DEFAULT_PREP_DURATION = 3;
+// Simple 1-exercise routine
+const simple = {
+  id: 'test',
+  exercises: [
+    { id: 'a', name: 'Push-ups', workDuration: 30, restBetweenSets: 10, sets: 3 }
+  ],
+  restBetweenExercises: 15
+};
 
-/**
- * Calculates the total expected duration of a routine in seconds.
- * Includes prep + all work phases + all rest phases.
- * 
- * @param {Object} routine - Routine object with exercises array
- * @param {number} [prepDuration=3] - Prep countdown duration
- * @returns {number} Total seconds
- */
-export function calculateRoutineDuration(routine, prepDuration = DEFAULT_PREP_DURATION) {
-  if (!routine || !Array.isArray(routine.exercises) || routine.exercises.length === 0) {
-    return 0;
-  }
-  
-  let total = prepDuration;  // initial prep countdown
-  
-  routine.exercises.forEach((exercise) => {
-    const sets = Math.max(1, exercise.sets || 1);
-    const workDuration = Math.max(0, exercise.workDuration || 0);
-    const restBetweenSets = Math.max(0, exercise.restBetweenSets || 0);
-    
-    // All work phases for this exercise
-    total += workDuration * sets;
-    
-    // Rests between sets (one fewer rest than sets — no rest after final set)
-    if (sets > 1) {
-      total += restBetweenSets * (sets - 1);
-    }
-  });
-  
-  // Rests between exercises (one fewer rest than exercises — no rest after final exercise)
-  const restBetweenExercises = Math.max(0, routine.restBetweenExercises || 0);
-  if (routine.exercises.length > 1) {
-    total += restBetweenExercises * (routine.exercises.length - 1);
-  }
-  
-  return total;
-}
+const seconds = calculateRoutineDuration(simple)
+console.log('Total seconds:', seconds)  
+// Expected: 3 (prep) + 30×3 (work) + 10×2 (rests) = 113
 
-/**
- * Formats a duration in seconds to a human-friendly string.
- * Examples:
- *   45    → "45 seconds"
- *   60    → "1 minute"
- *   90    → "1 minute 30 seconds"
- *   600   → "10 minutes"
- *   863   → "14 minutes 23 seconds"
- *   3600  → "1 hour"
- *   3720  → "1 hour 2 minutes"
- * 
- * @param {number} seconds 
- * @returns {string}
- */
-export function formatDuration(seconds) {
-  if (!seconds || seconds < 0) return '0 seconds';
-  
-  seconds = Math.round(seconds);
-  
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = seconds % 60;
-  
-  const parts = [];
-  
-  if (hours > 0) {
-    parts.push(`${hours} hour${hours === 1 ? '' : 's'}`);
-  }
-  
-  if (minutes > 0) {
-    parts.push(`${minutes} minute${minutes === 1 ? '' : 's'}`);
-  }
-  
-  // Only show seconds if total < 1 hour AND there are nonzero seconds
-  // Avoids awkward "1 hour 2 minutes 15 seconds"
-  if (hours === 0 && secs > 0) {
-    parts.push(`${secs} second${secs === 1 ? '' : 's'}`);
-  }
-  
-  return parts.join(' ') || '0 seconds';
-}
+console.log('Formatted:', formatDuration(seconds))
+// Expected: "1 minute 53 seconds"
 
-/**
- * Returns a compact form for tight UI spaces.
- * Examples:
- *   45    → "45s"
- *   60    → "1m"
- *   90    → "1m 30s"
- *   3720  → "1h 2m"
- * 
- * @param {number} seconds 
- * @returns {string}
- */
-export function formatDurationCompact(seconds) {
-  if (!seconds || seconds < 0) return '0s';
-  
-  seconds = Math.round(seconds);
-  
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = seconds % 60;
-  
-  const parts = [];
-  
-  if (hours > 0) parts.push(`${hours}h`);
-  if (minutes > 0) parts.push(`${minutes}m`);
-  if (hours === 0 && secs > 0) parts.push(`${secs}s`);
-  
-  return parts.join(' ') || '0s';
-}
+// 2
+const multi = {
+  id: 'test2',
+  exercises: [
+    { name: 'Superman', workDuration: 30, restBetweenSets: 10, sets: 5 },
+    { name: 'Sumo', workDuration: 30, restBetweenSets: 10, sets: 5 },
+    { name: 'Plank', workDuration: 30, restBetweenSets: 10, sets: 3 },
+    { name: 'Dog', workDuration: 60, restBetweenSets: 10, sets: 3 },
+    { name: 'Wall sit', workDuration: 30, restBetweenSets: 10, sets: 3 },
+  ],
+  restBetweenExercises: 15
+};
+
+const totalSec = calculateRoutineDuration(multi)
+console.log('Total:', totalSec, 'seconds')
+// Expected: 863
+
+console.log('Formatted:', formatDuration(totalSec))
+// Expected: "14 minutes 23 seconds"
+
+// 3
+// Empty routine
+console.log(calculateRoutineDuration(null))  // 0
+console.log(calculateRoutineDuration({ exercises: [] }))  // 0
+
+// Single exercise, single set
+const minimal = {
+  exercises: [{ workDuration: 30, sets: 1, restBetweenSets: 10 }],
+  restBetweenExercises: 0
+};
+console.log(calculateRoutineDuration(minimal))  // 33 (prep + 30 work, no rests)
+
+// Zero rests everywhere
+const noRest = {
+  exercises: [
+    { workDuration: 10, sets: 3, restBetweenSets: 0 },
+    { workDuration: 20, sets: 2, restBetweenSets: 0 },
+  ],
+  restBetweenExercises: 0
+};
+console.log(calculateRoutineDuration(noRest))  // 3 + 30 + 40 = 73
+
+// 4
+const { formatDuration, formatDurationCompact } = await import('/src/utils/routineDuration.js')
+
+console.log(formatDuration(0))      // "0 seconds"
+console.log(formatDuration(1))      // "1 second"
+console.log(formatDuration(45))     // "45 seconds"
+console.log(formatDuration(60))     // "1 minute"
+console.log(formatDuration(61))     // "1 minute 1 second"
+console.log(formatDuration(90))     // "1 minute 30 seconds"
+console.log(formatDuration(600))    // "10 minutes"
+console.log(formatDuration(863))    // "14 minutes 23 seconds"
+console.log(formatDuration(3600))   // "1 hour"
+console.log(formatDuration(3720))   // "1 hour 2 minutes"
+
+console.log(formatDurationCompact(45))    // "45s"
+console.log(formatDurationCompact(90))    // "1m 30s"
+console.log(formatDurationCompact(3720))  // "1h 2m"
+
+// 5
+const { getAllRoutines } = await import('/src/db/store.js')
+const { calculateRoutineDuration, formatDuration } = await import('/src/utils/routineDuration.js')
+
+const routines = await getAllRoutines()
+routines.forEach(r => {
+  const sec = calculateRoutineDuration(r)
+  console.log(`${r.title}: ${formatDuration(sec)} (${sec}s)`)
+})
+
