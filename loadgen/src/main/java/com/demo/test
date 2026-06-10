@@ -1,230 +1,46 @@
-ffmpeg -i keepawake.mp4 -c copy -movflags frag_keyframe+empty_moov+default_base_moof keepawake_frag.mp4
-
-ffmpeg -f lavfi -i "testsrc=duration=60:size=320x240:rate=30" \
-       -f lavfi -i "sine=frequency=440:duration=60" \
-       -c:v libx264 -pix_fmt yuv420p -profile:v baseline -level 3.0 \
-       -c:a aac -b:a 96k -ar 44100 \
-       -movflags frag_keyframe+empty_moov+default_base_moof \
-       keepawake_frag.mp4
-
-ffprobe -v error -show_format keepawake_frag.mp4 2>&1 | grep -E "format_name|duration"
-ls -lh keepawake_frag.mp4
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="mobile-web-app-capable" content="yes">
-  <title>MSE Wake Test</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>iOS API Check</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, sans-serif; background:#111; color:#eee; padding:16px; padding-top: env(safe-area-inset-top,16px); }
-    h1 { font-size:19px; margin-bottom:12px; }
-    #player { width:100%; height:35vh; background:#000; border-radius:8px; display:block; }
-    .beat-row { display:flex; align-items:center; gap:10px; margin:10px 0; }
-    #beat { width:20px; height:20px; border-radius:50%; background:#666; transition:background 0.1s; }
-    #ct { font-family:monospace; font-size:14px; color:#0f0; }
-    .status { text-align:center; padding:12px; border-radius:8px; background:#333; margin:10px 0; font-weight:700; }
-    .status.playing { background:#1b5e20; color:#a5d6a7; }
-    .timer { font-size:40px; font-weight:300; text-align:center; font-variant-numeric:tabular-nums; margin:10px 0; }
-    button { display:block; width:100%; padding:15px; font-size:16px; font-weight:700; border:none; border-radius:10px; cursor:pointer; margin-bottom:8px; -webkit-tap-highlight-color:transparent; }
-    .btn-go { background:#34c759; color:white; }
-    .btn-stop { background:#ff3b30; color:white; }
-    .log { background:#000; color:#6f6; padding:12px; border-radius:8px; font-family:monospace; font-size:11px; max-height:200px; overflow-y:auto; white-space:pre-wrap; margin-top:10px; }
-    .hint { font-size:12px; color:#999; line-height:1.5; margin-top:8px; }
+    body { font-family: -apple-system, monospace; padding: 20px; font-size: 16px; line-height: 1.8; background:#111; color:#0f0; }
+    .row { margin: 8px 0; padding: 8px; background:#000; border-radius:6px; }
+    .yes { color: #0f0; }
+    .no { color: #f66; }
+    h1 { font-size: 18px; color: #fff; }
   </style>
 </head>
 <body>
-  <h1>🎬 MSE Streaming Wake Test</h1>
-
-  <video id="player" loop playsinline></video>
-
-  <div class="beat-row">
-    <div id="beat"></div>
-    <div id="ct">currentTime: 0.00</div>
-  </div>
-
-  <div class="status" id="status">Stopped</div>
-  <div class="timer" id="timer">00:00</div>
-
-  <button class="btn-go" id="go-btn">▶ Start (MSE streaming)</button>
-  <button class="btn-stop" id="stop-btn" style="display:none;">⏹ Stop</button>
-
-  <div class="hint">
-    Streams keepawake_frag.mp4 via Media Source Extensions (YouTube's mechanism).
-    <br>🟢 green pulse = playing, 🔴 red = stopped.
-    <br>Keep volume down but NOT muted. Pocket phone, wait past auto-lock.
-  </div>
-
-  <div class="log" id="log">Ready…</div>
+  <h1>🔍 iOS Media API Check</h1>
+  <div id="out">Checking…</div>
 
   <script>
-    const player = document.getElementById('player');
-    const statusEl = document.getElementById('status');
-    const timerEl = document.getElementById('timer');
-    const logEl = document.getElementById('log');
-    const goBtn = document.getElementById('go-btn');
-    const stopBtn = document.getElementById('stop-btn');
-    const beat = document.getElementById('beat');
-    const ct = document.getElementById('ct');
+    const v = document.createElement('video');
+    const checks = {
+      'MediaSource': 'MediaSource' in window,
+      'ManagedMediaSource': 'ManagedMediaSource' in window,
+      'WebKitMediaSource': 'WebKitMediaSource' in window,
+      'HLS native (vnd.apple.mpegurl)': v.canPlayType('application/vnd.apple.mpegurl') || '(empty)',
+      'HLS native (x-mpegURL)': v.canPlayType('application/x-mpegURL') || '(empty)',
+      'mediaSession': 'mediaSession' in navigator,
+      'wakeLock': 'wakeLock' in navigator,
+      'MSE codec h264+aac': ('MediaSource' in window)
+          ? MediaSource.isTypeSupported('video/mp4; codecs="avc1.42E01E, mp4a.40.2"')
+          : (('ManagedMediaSource' in window)
+              ? ManagedMediaSource.isTypeSupported('video/mp4; codecs="avc1.42E01E, mp4a.40.2"')
+              : 'n/a'),
+    };
 
-    let startTime = null, timerInterval = null, lastVisible = Date.now();
-    let mediaSource = null, sourceBuffer = null, mediaData = null;
-
-    // MIME — must match the encode. baseline h264 + aac
-    const MIME = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"';
-
-    function log(m){ const t=new Date().toLocaleTimeString(); logEl.textContent=`[${t}] ${m}\n`+logEl.textContent; }
-    function updateTimer(){ if(!startTime)return; const e=Math.floor((Date.now()-startTime)/1000); timerEl.textContent=`${String(Math.floor(e/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`; }
-
-    // Heartbeat — proves playback is advancing
-    let lastCT = -1, flip = false;
-    setInterval(() => {
-      const t = player.currentTime;
-      ct.textContent = `currentTime: ${t.toFixed(2)}`;
-      if (t !== lastCT && !player.paused) {
-        flip = !flip;
-        beat.style.background = flip ? '#0f0' : '#080';
-      } else {
-        beat.style.background = '#f00';
-      }
-      lastCT = t;
-    }, 250);
-
-    async function fetchMedia() {
-      log('⬇ Fetching keepawake_frag.mp4...');
-      const resp = await fetch('keepawake_frag.mp4');
-      if (!resp.ok) throw new Error(`fetch failed: ${resp.status}`);
-      mediaData = await resp.arrayBuffer();
-      log(`✅ Fetched ${(mediaData.byteLength/1024).toFixed(1)} KB`);
+    let html = '';
+    for (const [k, val] of Object.entries(checks)) {
+      const isYes = val === true || (typeof val === 'string' && val !== '(empty)' && val !== '');
+      const cls = isYes ? 'yes' : 'no';
+      html += `<div class="row"><span class="${cls}">${isYes ? '✅' : '❌'}</span> ${k}: <b>${val}</b></div>`;
     }
-
-    function setupMediaSource() {
-      return new Promise((resolve, reject) => {
-        if (!('MediaSource' in window)) {
-          reject(new Error('MediaSource API not supported'));
-          return;
-        }
-        if (!MediaSource.isTypeSupported(MIME)) {
-          log(`⚠️ MIME not supported: ${MIME}`);
-          log('   Trying anyway...');
-        } else {
-          log(`✅ MIME supported: ${MIME}`);
-        }
-
-        mediaSource = new MediaSource();
-        player.src = URL.createObjectURL(mediaSource);
-
-        mediaSource.addEventListener('sourceopen', () => {
-          log('📂 MediaSource opened');
-          try {
-            sourceBuffer = mediaSource.addSourceBuffer(MIME);
-            log('✅ SourceBuffer created');
-
-            sourceBuffer.addEventListener('updateend', () => {
-              log('✅ Initial chunk appended');
-              // Keep appending to simulate continuous streaming (loop the data)
-              if (mediaSource.readyState === 'open') {
-                // Don't end the stream — keep it "live" like YouTube
-                log('📡 Stream kept open (live mode)');
-              }
-              resolve();
-            }, { once: true });
-
-            sourceBuffer.addEventListener('error', (e) => {
-              log(`❌ SourceBuffer error`);
-            });
-
-            // Append the whole file as one chunk (simple approach)
-            sourceBuffer.appendBuffer(mediaData);
-            log('📡 Appending media data...');
-          } catch (err) {
-            reject(err);
-          }
-        }, { once: true });
-
-        mediaSource.addEventListener('sourceended', () => log('📂 MediaSource ended'));
-        mediaSource.addEventListener('error', () => log('❌ MediaSource error'));
-      });
-    }
-
-    function setupMediaSession() {
-      if (!('mediaSession' in navigator)) {
-        log('⚠️ MediaSession API not available');
-        return;
-      }
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: 'HoldOn Workout',
-        artist: 'Keep Screen Awake',
-        album: 'Exercise Session'
-      });
-      navigator.mediaSession.playbackState = 'playing';
-      navigator.mediaSession.setActionHandler('play', () => player.play());
-      navigator.mediaSession.setActionHandler('pause', () => player.pause());
-      log('✅ MediaSession configured');
-    }
-
-    async function start() {
-      try {
-        goBtn.disabled = true;
-        log('--- Starting MSE setup ---');
-
-        if (!mediaData) await fetchMedia();
-        await setupMediaSource();
-
-        player.muted = false;
-        player.volume = 1.0;
-        player.loop = true;
-
-        await player.play();
-        setupMediaSession();
-
-        startTime = Date.now();
-        timerInterval = setInterval(updateTimer, 250);
-        statusEl.textContent = '🎬 MSE streaming — screen should stay ON';
-        statusEl.className = 'status playing';
-        goBtn.style.display='none'; stopBtn.style.display='block';
-        log(`▶ Playing via MSE, muted=${player.muted}, paused=${player.paused}`);
-      } catch (err) {
-        log(`❌ Start failed: ${err.message}`);
-        statusEl.textContent = `❌ ${err.message}`;
-      } finally {
-        goBtn.disabled = false;
-      }
-    }
-
-    function stop() {
-      player.pause();
-      if ('mediaSession' in navigator) navigator.mediaSession.playbackState='paused';
-      clearInterval(timerInterval); startTime=null;
-      timerEl.textContent='00:00';
-      statusEl.textContent='Stopped'; statusEl.className='status';
-      goBtn.style.display='block'; stopBtn.style.display='none';
-      log('⏹ Stopped');
-    }
-
-    goBtn.addEventListener('click', start);
-    stopBtn.addEventListener('click', stop);
-
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) log('📵 Page hidden (screen locked)');
-      else { const h=Math.floor((Date.now()-lastVisible)/1000); log(`📱 Visible (hidden ~${h}s), paused=${player.paused}`); }
-      lastVisible = Date.now();
-    });
-
-    player.addEventListener('pause', () => { if(startTime) log('⚠️ Video PAUSED'); });
-    player.addEventListener('playing', () => log('▶ playing event'));
-    player.addEventListener('waiting', () => log('⏳ waiting (buffering)'));
-    player.addEventListener('stalled', () => log('⚠️ stalled'));
-    player.addEventListener('error', () => log(`❌ Video error: ${player.error?.code}`));
-    player.addEventListener('loadedmetadata', () => log(`📂 Metadata: ${player.videoWidth}x${player.videoHeight}, dur=${player.duration.toFixed(1)}s`));
-
-    log(`MediaSource supported: ${'MediaSource' in window}`);
-    log(`mediaSession supported: ${'mediaSession' in navigator}`);
-    log(`MIME supported: ${'MediaSource' in window ? MediaSource.isTypeSupported(MIME) : 'n/a'}`);
-    log('Tap Start. Keep volume down but unmuted.');
+    html += `<div class="row" style="color:#888">UA: ${navigator.userAgent}</div>`;
+    document.getElementById('out').innerHTML = html;
   </script>
 </body>
 </html>
