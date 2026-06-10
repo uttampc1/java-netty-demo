@@ -1,3 +1,28 @@
+/**
+ * iOS (and others) release the wake lock whenever the page is hidden
+ * (app switch, lock, notification shade, tab change). When the page becomes
+ * visible again, re-acquire if a workout still wants the screen on.
+ *
+ * This is THE piece that makes wake lock reliable on iOS.
+ */
+function bindVisibilityHandler() {
+  if (visibilityBound || typeof document === 'undefined') return;
+  visibilityBound = true;
+
+  document.addEventListener('visibilitychange', async () => {
+    if (
+      document.visibilityState === 'visible' &&
+      wantLock &&
+      (!currentLock || currentLock.released)
+    ) {
+      console.log('[WakeLock] Page visible again — re-acquiring');
+      await acquireWakeLock();
+    }
+  });
+}
+
+
+
 https://www.youtube.com/embed/RiwCzRnaTkg?autoplay=1&playsinline=1&mute=0&controls=1&loop=1&playlist=RiwCzRnaTkg"
       allow="autoplay; encrypted-media
 
