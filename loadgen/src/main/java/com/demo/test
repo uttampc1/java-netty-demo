@@ -13,59 +13,143 @@ print("Serving on https://0.0.0.0:8443")
 server.serve_forever()
 EOF
 
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WakeLock HTTPS Test</title>
-  <style>
-    body { font-family:-apple-system,sans-serif; padding:24px; background:#111; color:#0f0; font-size:16px; }
-    button { padding:18px 32px; font-size:18px; font-weight:700; background:#34c759; color:#fff; border:none; border-radius:10px; margin:12px 0; }
-    .log { background:#000; padding:12px; border-radius:8px; font-family:monospace; font-size:12px; white-space:pre-wrap; margin-top:16px; }
-    .big { font-size:48px; text-align:center; margin:20px 0; }
-  </style>
-</head>
-<body>
-  <h1>🔒 Wake Lock HTTPS Test</h1>
-  <div class="big" id="timer">00:00</div>
-  <button id="btn">🔆 Request Wake Lock</button>
-  <div class="log" id="log">Checking…</div>
+/// Add a tiny indicator so the user knows the screen is being held — and so you can see it working during testing.
+// HTML (place in your player view, e.g. near the timer):
+<div id="wakelock-indicator" class="wakelock-indicator" hidden>
+  <span class="dot"></span>
+  <span class="label">Screen lock on</span>
+</div>
 
-  <script>
-    const log = (m) => { document.getElementById('log').textContent =
-      `[${new Date().toLocaleTimeString()}] ${m}\n` + document.getElementById('log').textContent; };
+// Styles
+.wakelock-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #2e7d32;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(52, 199, 89, 0.12);
+}
+.wakelock-indicator .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #34c759;
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%,100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.wakelock-indicator.unsupported { color:#b26a00; background:rgba(255,159,10,0.12); }
+.wakelock-indicator.unsupported .dot { background:#ff9f0a; animation:none; }
 
-    log(`isSecureContext: ${window.isSecureContext}`);
-    log(`'wakeLock' in navigator: ${'wakeLock' in navigator}`);
+// JS Handler
+function updateWakeLockIndicator(status) {
+  const el = document.getElementById('wakelock-indicator');
+  if (!el) return;
+  const label = el.querySelector('.label');
 
-    let wakeLock = null;
-    let start = Date.now();
-    setInterval(() => {
-      const e = Math.floor((Date.now()-start)/1000);
-      document.getElementById('timer').textContent =
-        `${String(Math.floor(e/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`;
-    }, 500);
+  if (!status.supported) {
+    el.hidden = false;
+    el.classList.add('unsupported');
+    label.textContent = 'Screen may sleep (browser unsupported)';
+    return;
+  }
 
-    async function acquire() {
-      try {
-        if (!('wakeLock' in navigator)) { log('❌ wakeLock not in navigator'); return; }
-        wakeLock = await navigator.wakeLock.request('screen');
-        log('✅ Wake Lock ACQUIRED — screen should stay on');
-        wakeLock.addEventListener('release', () => log('⚠️ Wake Lock released'));
-      } catch (err) {
-        log(`❌ ${err.name}: ${err.message}`);
-      }
-    }
+  el.classList.remove('unsupported');
 
-    document.getElementById('btn').addEventListener('click', acquire);
+  if (status.active) {
+    el.hidden = false;
+    label.textContent = 'Screen lock on';
+  } else {
+    // released or off — hide unless a workout is still wanted
+    el.hidden = true;
+  }
+}
 
-    document.addEventListener('visibilitychange', async () => {
-      if (document.visibilityState === 'visible' && wakeLock === null) {
-        log('📱 Visible again — re-acquiring');
-        await acquire();
+
+
+// 
+// Create wakeLock.js (or add to your existing JS)
+/**
+ * WakeLockManager - keeps screen on during workouts.
+ * Requires HTTPS (or localhost). Works iOS 16.4+, Android, desktop.
+ */
+class WakeLockManager {
+  constructor({ onStatusChange } = {}) {
+    this.wakeLock = null;
+    this.wanted = false;          // true while a workout is active
+    this.onStatusChange = onStatusChange || (() => {});
+    this.supported = 'wakeLock' in navigator;
+
+    // iOS releases the lock when page is hidden — re-acquire on return
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && this.wanted && !this.wakeLock) {
+        this._acquire();
       }
     });
-  </script>
-</body>
-</html>
+  }
+
+  isSupported() {
+    return this.supported;
+  }
+
+  async enable() {
+    this.wanted = true;
+    await this._acquire();
+  }
+
+  async disable() {
+    this.wanted = false;
+    if (this.wakeLock) {
+      try { await this.wakeLock.release(); } catch (_) {}
+      this.wakeLock = null;
+    }
+    this.onStatusChange({ active: false, supported: this.supported });
+  }
+
+  async _acquire() {
+    if (!this.supported) {
+      this.onStatusChange({ active: false, supported: false });
+      return;
+    }
+    if (this.wakeLock) return; // already held
+
+    try {
+      this.wakeLock = await navigator.wakeLock.request('screen');
+      this.wakeLock.addEventListener('release', () => {
+        this.wakeLock = null;
+        // If still wanted (e.g. OS released it), status reflects "not active"
+        this.onStatusChange({ active: false, supported: true, released: true });
+      });
+      this.onStatusChange({ active: true, supported: true });
+    } catch (err) {
+      this.wakeLock = null;
+      this.onStatusChange({ active: false, supported: true, error: err.message });
+    }
+  }
+}
+
+Integrate into the Player
+// --- Setup (once, near player init) ---
+const wakeLockManager = new WakeLockManager({
+  onStatusChange: (status) => updateWakeLockIndicator(status)
+});
+
+// --- When a workout STARTS ---
+function startWorkout() {
+  // ... your existing start logic ...
+  wakeLockManager.enable();
+}
+
+// --- When a workout ENDS or is fully STOPPED ---
+function endWorkout() {
+  // ... your existing end logic ...
+  wakeLockManager.disable();
+}
+
+// --- PAUSE behavior (your choice) ---
+// Option A: keep screen on during pause (recommended — user may resume soon)
+//   → do nothing on pause
+// Option B: release on pause to save battery
+//   → wakeLockManager.disable() on pause, wakeLockManager.enable() on resume
