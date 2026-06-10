@@ -12,3 +12,60 @@ server.socket = ctx.wrap_socket(server.socket, server_side=True)
 print("Serving on https://0.0.0.0:8443")
 server.serve_forever()
 EOF
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WakeLock HTTPS Test</title>
+  <style>
+    body { font-family:-apple-system,sans-serif; padding:24px; background:#111; color:#0f0; font-size:16px; }
+    button { padding:18px 32px; font-size:18px; font-weight:700; background:#34c759; color:#fff; border:none; border-radius:10px; margin:12px 0; }
+    .log { background:#000; padding:12px; border-radius:8px; font-family:monospace; font-size:12px; white-space:pre-wrap; margin-top:16px; }
+    .big { font-size:48px; text-align:center; margin:20px 0; }
+  </style>
+</head>
+<body>
+  <h1>🔒 Wake Lock HTTPS Test</h1>
+  <div class="big" id="timer">00:00</div>
+  <button id="btn">🔆 Request Wake Lock</button>
+  <div class="log" id="log">Checking…</div>
+
+  <script>
+    const log = (m) => { document.getElementById('log').textContent =
+      `[${new Date().toLocaleTimeString()}] ${m}\n` + document.getElementById('log').textContent; };
+
+    log(`isSecureContext: ${window.isSecureContext}`);
+    log(`'wakeLock' in navigator: ${'wakeLock' in navigator}`);
+
+    let wakeLock = null;
+    let start = Date.now();
+    setInterval(() => {
+      const e = Math.floor((Date.now()-start)/1000);
+      document.getElementById('timer').textContent =
+        `${String(Math.floor(e/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`;
+    }, 500);
+
+    async function acquire() {
+      try {
+        if (!('wakeLock' in navigator)) { log('❌ wakeLock not in navigator'); return; }
+        wakeLock = await navigator.wakeLock.request('screen');
+        log('✅ Wake Lock ACQUIRED — screen should stay on');
+        wakeLock.addEventListener('release', () => log('⚠️ Wake Lock released'));
+      } catch (err) {
+        log(`❌ ${err.name}: ${err.message}`);
+      }
+    }
+
+    document.getElementById('btn').addEventListener('click', acquire);
+
+    document.addEventListener('visibilitychange', async () => {
+      if (document.visibilityState === 'visible' && wakeLock === null) {
+        log('📱 Visible again — re-acquiring');
+        await acquire();
+      }
+    });
+  </script>
+</body>
+</html>
