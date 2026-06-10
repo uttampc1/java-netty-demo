@@ -1,11 +1,9 @@
-ffmpeg -i keepawake.mp4 \
-  -c:v h264 -profile:v baseline -level 3.0 -pix_fmt yuv420p \
-  -c:a aac -b:a 96k -ar 44100 \
-  -hls_time 4 \
-  -hls_list_size 0 \
-  -hls_playlist_type vod \
-  -hls_segment_filename "seg_%03d.ts" \
-  keepawake.m3u8
+ffmpeg -f lavfi -i "testsrc=duration=60:size=320x240:rate=30" \
+       -f lavfi -i "sine=frequency=440:duration=60" \
+       -c:v libx264 -profile:v baseline -level 3.0 -pix_fmt yuv420p \
+       -c:a aac -b:a 96k -ar 44100 \
+       -movflags frag_keyframe+empty_moov+default_base_moof+separate_moof \
+       mms.mp4
 
 
 <!DOCTYPE html>
@@ -14,27 +12,27 @@ ffmpeg -i keepawake.mp4 \
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <title>HLS Wake Test</title>
+  <title>ManagedMediaSource Wake Test</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, sans-serif; background:#111; color:#eee; padding:16px; padding-top:env(safe-area-inset-top,16px); }
-    h1 { font-size:19px; margin-bottom:12px; }
+    h1 { font-size:18px; margin-bottom:12px; }
     #player { width:100%; height:30vh; background:#000; border-radius:8px; }
     .beat-row { display:flex; align-items:center; gap:10px; margin:10px 0; }
     #beat { width:18px; height:18px; border-radius:50%; background:#666; transition:background 0.1s; }
     #ct { font-family:monospace; font-size:13px; color:#0f0; }
-    .status { text-align:center; padding:12px; border-radius:8px; background:#333; margin:10px 0; font-weight:700; }
+    .status { text-align:center; padding:12px; border-radius:8px; background:#333; margin:10px 0; font-weight:700; font-size:14px; }
     .status.playing { background:#1b5e20; color:#a5d6a7; }
-    .timer { font-size:40px; font-weight:300; text-align:center; font-variant-numeric:tabular-nums; margin:10px 0; }
+    .timer { font-size:38px; font-weight:300; text-align:center; font-variant-numeric:tabular-nums; margin:10px 0; }
     button { display:block; width:100%; padding:15px; font-size:16px; font-weight:700; border:none; border-radius:10px; cursor:pointer; margin-bottom:8px; -webkit-tap-highlight-color:transparent; }
     .btn-go { background:#34c759; color:white; }
     .btn-stop { background:#ff3b30; color:white; }
-    .log { background:#000; color:#6f6; padding:12px; border-radius:8px; font-family:monospace; font-size:11px; max-height:200px; overflow-y:auto; white-space:pre-wrap; margin-top:10px; }
+    .log { background:#000; color:#6f6; padding:12px; border-radius:8px; font-family:monospace; font-size:11px; max-height:240px; overflow-y:auto; white-space:pre-wrap; margin-top:10px; }
     .hint { font-size:12px; color:#999; line-height:1.5; margin-top:8px; }
   </style>
 </head>
 <body>
-  <h1>🎬 HLS Native Streaming Test</h1>
+  <h1>🎬 ManagedMediaSource Wake Test</h1>
 
   <video id="player" loop playsinline></video>
 
@@ -46,12 +44,12 @@ ffmpeg -i keepawake.mp4 \
   <div class="status" id="status">Stopped</div>
   <div class="timer" id="timer">00:00</div>
 
-  <button class="btn-go" id="go-btn">▶ Start HLS</button>
+  <button class="btn-go" id="go-btn">▶ Start (ManagedMediaSource)</button>
   <button class="btn-stop" id="stop-btn" style="display:none;">⏹ Stop</button>
 
   <div class="hint">
-    Native HLS streaming (iOS plays .m3u8 directly). This is how YouTube/Netflix stream.
-    Keep volume down but NOT muted. Pocket phone, wait past auto-lock.
+    Uses ManagedMediaSource (Apple's MSE, what YouTube uses on iOS 17+).
+    🟢 green = playing. Keep volume down but NOT muted. Pocket phone, wait past auto-lock.
   </div>
 
   <div class="log" id="log">Ready…</div>
@@ -67,6 +65,9 @@ ffmpeg -i keepawake.mp4 \
     const ct = document.getElementById('ct');
 
     let startTime=null, timerInterval=null, lastVisible=Date.now();
+    let mediaSource=null, sourceBuffer=null, mediaData=null;
+
+    const MIME = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"';
 
     function log(m){ const t=new Date().toLocaleTimeString(); logEl.textContent=`[${t}] ${m}\n`+logEl.textContent; }
     function updateTimer(){ if(!startTime)return; const e=Math.floor((Date.now()-startTime)/1000); timerEl.textContent=`${String(Math.floor(e/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`; }
@@ -81,41 +82,120 @@ ffmpeg -i keepawake.mp4 \
       lastCT = t;
     }, 250);
 
+    async function fetchMedia() {
+      log('⬇ Fetching mms.mp4...');
+      const resp = await fetch('mms.mp4');
+      if (!resp.ok) throw new Error(`fetch failed: ${resp.status}`);
+      mediaData = await resp.arrayBuffer();
+      log(`✅ Fetched ${(mediaData.byteLength/1024).toFixed(1)} KB`);
+    }
+
+    function setupManagedMediaSource() {
+      return new Promise((resolve, reject) => {
+        // Pick the right constructor — prefer ManagedMediaSource on iOS
+        const MMS = window.ManagedMediaSource || window.MediaSource;
+        if (!MMS) { reject(new Error('No MediaSource or ManagedMediaSource')); return; }
+
+        const usingManaged = !!window.ManagedMediaSource;
+        log(`Using: ${usingManaged ? 'ManagedMediaSource ✅' : 'MediaSource (fallback)'}`);
+
+        if (!MMS.isTypeSupported(MIME)) {
+          log(`⚠️ MIME not supported: ${MIME}`);
+        } else {
+          log(`✅ MIME supported`);
+        }
+
+        mediaSource = new MMS();
+
+        // ManagedMediaSource requires the video element to know it can disconnect
+        // Set disableRemotePlayback to avoid AirPlay interference
+        player.disableRemotePlayback = true;
+
+        const objectURL = URL.createObjectURL(mediaSource);
+        player.src = objectURL;
+
+        // ManagedMediaSource uses startstreaming/endstreaming events
+        if (usingManaged) {
+          mediaSource.addEventListener('startstreaming', () => {
+            log('📡 startstreaming event');
+          });
+          mediaSource.addEventListener('endstreaming', () => {
+            log('📡 endstreaming event');
+          });
+        }
+
+        mediaSource.addEventListener('sourceopen', () => {
+          log('📂 sourceopen');
+          try {
+            URL.revokeObjectURL(objectURL);
+            sourceBuffer = mediaSource.addSourceBuffer(MIME);
+            log('✅ SourceBuffer created');
+
+            sourceBuffer.addEventListener('updateend', () => {
+              log('✅ chunk appended, buffered ranges: ' + (sourceBuffer.buffered.length));
+              if (sourceBuffer.buffered.length > 0) {
+                log(`   buffered: 0 → ${sourceBuffer.buffered.end(0).toFixed(1)}s`);
+              }
+              resolve();
+            }, { once: true });
+
+            sourceBuffer.addEventListener('error', () => log('❌ SourceBuffer error'));
+
+            log('📡 appending media data...');
+            sourceBuffer.appendBuffer(mediaData);
+          } catch (err) {
+            reject(err);
+          }
+        }, { once: true });
+
+        mediaSource.addEventListener('error', () => log('❌ MediaSource error'));
+        mediaSource.addEventListener('sourceended', () => log('📂 sourceended'));
+      });
+    }
+
+    function setupMediaSession() {
+      if (!('mediaSession' in navigator)) { log('⚠️ no mediaSession'); return; }
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: 'HoldOn Workout', artist: 'Keep Awake', album: 'Exercise'
+      });
+      navigator.mediaSession.playbackState = 'playing';
+      navigator.mediaSession.setActionHandler('play', () => player.play());
+      navigator.mediaSession.setActionHandler('pause', () => player.pause());
+      log('✅ MediaSession configured');
+    }
+
     async function start() {
       try {
-        const canHLS = player.canPlayType('application/vnd.apple.mpegurl');
-        log(`canPlayType HLS: "${canHLS}"`);
+        goBtn.disabled = true;
+        log('--- ManagedMediaSource setup ---');
+        log(`ManagedMediaSource available: ${'ManagedMediaSource' in window}`);
 
-        player.src = 'keepawake.m3u8';   // native HLS — iOS handles it
-        player.loop = true;
+        if (!mediaData) await fetchMedia();
+        await setupManagedMediaSource();
+
         player.muted = false;
         player.volume = 1.0;
+        player.loop = true;
 
         await player.play();
-
-        // Media Session (YouTube sets this too)
-        if ('mediaSession' in navigator) {
-          navigator.mediaSession.metadata = new MediaMetadata({
-            title: 'HoldOn Workout', artist: 'Keep Awake', album: 'Exercise'
-          });
-          navigator.mediaSession.playbackState = 'playing';
-          log('✅ MediaSession set');
-        }
+        setupMediaSession();
 
         startTime = Date.now();
         timerInterval = setInterval(updateTimer, 250);
-        statusEl.textContent = '🎬 HLS playing — screen should stay ON';
+        statusEl.textContent = '🎬 ManagedMediaSource playing';
         statusEl.className = 'status playing';
         goBtn.style.display='none'; stopBtn.style.display='block';
-        log(`▶ Playing HLS, muted=${player.muted}, paused=${player.paused}`);
-      } catch(err) {
+        log(`▶ Playing, muted=${player.muted}, paused=${player.paused}`);
+      } catch (err) {
         log(`❌ Start failed: ${err.message}`);
         statusEl.textContent = `❌ ${err.message}`;
+      } finally {
+        goBtn.disabled = false;
       }
     }
 
     function stop() {
-      player.pause(); player.removeAttribute('src'); player.load();
+      player.pause();
       if ('mediaSession' in navigator) navigator.mediaSession.playbackState='paused';
       clearInterval(timerInterval); startTime=null;
       timerEl.textContent='00:00';
@@ -133,15 +213,16 @@ ffmpeg -i keepawake.mp4 \
       lastVisible=Date.now();
     });
 
-    player.addEventListener('pause', ()=>{ if(startTime) log('⚠️ PAUSED'); });
+    player.addEventListener('pause', ()=>{ if(startTime) log('⚠️ video PAUSED'); });
     player.addEventListener('playing', ()=> log('▶ playing event'));
-    player.addEventListener('waiting', ()=> log('⏳ buffering'));
+    player.addEventListener('waiting', ()=> log('⏳ waiting'));
     player.addEventListener('stalled', ()=> log('⚠️ stalled'));
-    player.addEventListener('error', ()=> log(`❌ error code: ${player.error?.code}`));
-    player.addEventListener('loadedmetadata', ()=> log(`📂 ${player.videoWidth}x${player.videoHeight}, dur=${player.duration.toFixed(1)}s`));
+    player.addEventListener('error', ()=> log(`❌ video error code: ${player.error?.code}`));
+    player.addEventListener('loadedmetadata', ()=> log(`📂 metadata: ${player.videoWidth}x${player.videoHeight}, dur=${player.duration?.toFixed(1)}s`));
 
-    log(`HLS support: "${player.canPlayType('application/vnd.apple.mpegurl')}"`);
-    log('Tap Start. Keep volume down but unmuted.');
+    log(`ManagedMediaSource: ${'ManagedMediaSource' in window}`);
+    log(`MediaSource: ${'MediaSource' in window}`);
+    log('Tap Start. Volume down but unmuted.');
   </script>
 </body>
 </html>
