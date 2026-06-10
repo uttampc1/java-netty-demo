@@ -1,46 +1,147 @@
+ffmpeg -i keepawake.mp4 \
+  -c:v h264 -profile:v baseline -level 3.0 -pix_fmt yuv420p \
+  -c:a aac -b:a 96k -ar 44100 \
+  -hls_time 4 \
+  -hls_list_size 0 \
+  -hls_playlist_type vod \
+  -hls_segment_filename "seg_%03d.ts" \
+  keepawake.m3u8
+
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>iOS API Check</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>HLS Wake Test</title>
   <style>
-    body { font-family: -apple-system, monospace; padding: 20px; font-size: 16px; line-height: 1.8; background:#111; color:#0f0; }
-    .row { margin: 8px 0; padding: 8px; background:#000; border-radius:6px; }
-    .yes { color: #0f0; }
-    .no { color: #f66; }
-    h1 { font-size: 18px; color: #fff; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, sans-serif; background:#111; color:#eee; padding:16px; padding-top:env(safe-area-inset-top,16px); }
+    h1 { font-size:19px; margin-bottom:12px; }
+    #player { width:100%; height:30vh; background:#000; border-radius:8px; }
+    .beat-row { display:flex; align-items:center; gap:10px; margin:10px 0; }
+    #beat { width:18px; height:18px; border-radius:50%; background:#666; transition:background 0.1s; }
+    #ct { font-family:monospace; font-size:13px; color:#0f0; }
+    .status { text-align:center; padding:12px; border-radius:8px; background:#333; margin:10px 0; font-weight:700; }
+    .status.playing { background:#1b5e20; color:#a5d6a7; }
+    .timer { font-size:40px; font-weight:300; text-align:center; font-variant-numeric:tabular-nums; margin:10px 0; }
+    button { display:block; width:100%; padding:15px; font-size:16px; font-weight:700; border:none; border-radius:10px; cursor:pointer; margin-bottom:8px; -webkit-tap-highlight-color:transparent; }
+    .btn-go { background:#34c759; color:white; }
+    .btn-stop { background:#ff3b30; color:white; }
+    .log { background:#000; color:#6f6; padding:12px; border-radius:8px; font-family:monospace; font-size:11px; max-height:200px; overflow-y:auto; white-space:pre-wrap; margin-top:10px; }
+    .hint { font-size:12px; color:#999; line-height:1.5; margin-top:8px; }
   </style>
 </head>
 <body>
-  <h1>🔍 iOS Media API Check</h1>
-  <div id="out">Checking…</div>
+  <h1>🎬 HLS Native Streaming Test</h1>
+
+  <video id="player" loop playsinline></video>
+
+  <div class="beat-row">
+    <div id="beat"></div>
+    <div id="ct">currentTime: 0.00</div>
+  </div>
+
+  <div class="status" id="status">Stopped</div>
+  <div class="timer" id="timer">00:00</div>
+
+  <button class="btn-go" id="go-btn">▶ Start HLS</button>
+  <button class="btn-stop" id="stop-btn" style="display:none;">⏹ Stop</button>
+
+  <div class="hint">
+    Native HLS streaming (iOS plays .m3u8 directly). This is how YouTube/Netflix stream.
+    Keep volume down but NOT muted. Pocket phone, wait past auto-lock.
+  </div>
+
+  <div class="log" id="log">Ready…</div>
 
   <script>
-    const v = document.createElement('video');
-    const checks = {
-      'MediaSource': 'MediaSource' in window,
-      'ManagedMediaSource': 'ManagedMediaSource' in window,
-      'WebKitMediaSource': 'WebKitMediaSource' in window,
-      'HLS native (vnd.apple.mpegurl)': v.canPlayType('application/vnd.apple.mpegurl') || '(empty)',
-      'HLS native (x-mpegURL)': v.canPlayType('application/x-mpegURL') || '(empty)',
-      'mediaSession': 'mediaSession' in navigator,
-      'wakeLock': 'wakeLock' in navigator,
-      'MSE codec h264+aac': ('MediaSource' in window)
-          ? MediaSource.isTypeSupported('video/mp4; codecs="avc1.42E01E, mp4a.40.2"')
-          : (('ManagedMediaSource' in window)
-              ? ManagedMediaSource.isTypeSupported('video/mp4; codecs="avc1.42E01E, mp4a.40.2"')
-              : 'n/a'),
-    };
+    const player = document.getElementById('player');
+    const statusEl = document.getElementById('status');
+    const timerEl = document.getElementById('timer');
+    const logEl = document.getElementById('log');
+    const goBtn = document.getElementById('go-btn');
+    const stopBtn = document.getElementById('stop-btn');
+    const beat = document.getElementById('beat');
+    const ct = document.getElementById('ct');
 
-    let html = '';
-    for (const [k, val] of Object.entries(checks)) {
-      const isYes = val === true || (typeof val === 'string' && val !== '(empty)' && val !== '');
-      const cls = isYes ? 'yes' : 'no';
-      html += `<div class="row"><span class="${cls}">${isYes ? '✅' : '❌'}</span> ${k}: <b>${val}</b></div>`;
+    let startTime=null, timerInterval=null, lastVisible=Date.now();
+
+    function log(m){ const t=new Date().toLocaleTimeString(); logEl.textContent=`[${t}] ${m}\n`+logEl.textContent; }
+    function updateTimer(){ if(!startTime)return; const e=Math.floor((Date.now()-startTime)/1000); timerEl.textContent=`${String(Math.floor(e/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`; }
+
+    // Heartbeat
+    let lastCT=-1, flip=false;
+    setInterval(() => {
+      const t = player.currentTime;
+      ct.textContent = `currentTime: ${t.toFixed(2)}`;
+      if (t !== lastCT && !player.paused) { flip=!flip; beat.style.background = flip?'#0f0':'#080'; }
+      else { beat.style.background='#f00'; }
+      lastCT = t;
+    }, 250);
+
+    async function start() {
+      try {
+        const canHLS = player.canPlayType('application/vnd.apple.mpegurl');
+        log(`canPlayType HLS: "${canHLS}"`);
+
+        player.src = 'keepawake.m3u8';   // native HLS — iOS handles it
+        player.loop = true;
+        player.muted = false;
+        player.volume = 1.0;
+
+        await player.play();
+
+        // Media Session (YouTube sets this too)
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: 'HoldOn Workout', artist: 'Keep Awake', album: 'Exercise'
+          });
+          navigator.mediaSession.playbackState = 'playing';
+          log('✅ MediaSession set');
+        }
+
+        startTime = Date.now();
+        timerInterval = setInterval(updateTimer, 250);
+        statusEl.textContent = '🎬 HLS playing — screen should stay ON';
+        statusEl.className = 'status playing';
+        goBtn.style.display='none'; stopBtn.style.display='block';
+        log(`▶ Playing HLS, muted=${player.muted}, paused=${player.paused}`);
+      } catch(err) {
+        log(`❌ Start failed: ${err.message}`);
+        statusEl.textContent = `❌ ${err.message}`;
+      }
     }
-    html += `<div class="row" style="color:#888">UA: ${navigator.userAgent}</div>`;
-    document.getElementById('out').innerHTML = html;
+
+    function stop() {
+      player.pause(); player.removeAttribute('src'); player.load();
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState='paused';
+      clearInterval(timerInterval); startTime=null;
+      timerEl.textContent='00:00';
+      statusEl.textContent='Stopped'; statusEl.className='status';
+      goBtn.style.display='block'; stopBtn.style.display='none';
+      log('⏹ Stopped');
+    }
+
+    goBtn.addEventListener('click', start);
+    stopBtn.addEventListener('click', stop);
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) log('📵 Page hidden (screen locked)');
+      else { const h=Math.floor((Date.now()-lastVisible)/1000); log(`📱 Visible (hidden ~${h}s), paused=${player.paused}`); }
+      lastVisible=Date.now();
+    });
+
+    player.addEventListener('pause', ()=>{ if(startTime) log('⚠️ PAUSED'); });
+    player.addEventListener('playing', ()=> log('▶ playing event'));
+    player.addEventListener('waiting', ()=> log('⏳ buffering'));
+    player.addEventListener('stalled', ()=> log('⚠️ stalled'));
+    player.addEventListener('error', ()=> log(`❌ error code: ${player.error?.code}`));
+    player.addEventListener('loadedmetadata', ()=> log(`📂 ${player.videoWidth}x${player.videoHeight}, dur=${player.duration.toFixed(1)}s`));
+
+    log(`HLS support: "${player.canPlayType('application/vnd.apple.mpegurl')}"`);
+    log('Tap Start. Keep volume down but unmuted.');
   </script>
 </body>
 </html>
