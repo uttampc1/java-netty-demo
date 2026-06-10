@@ -3,185 +3,64 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="mobile-web-app-capable" content="yes">
-  <title>Big Video Wake Test</title>
+  <title>YouTube iframe Wake Test</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-      background: #111; color: #eee; min-height: 100vh;
-    }
-
-    /* Big video fills most of screen, like YouTube */
-    #player {
-      width: 100%;
-      height: 50vh;
-      background: #000;
-      object-fit: cover;
-      display: block;
-    }
-
-    .controls { padding: 20px; padding-top: env(safe-area-inset-top, 20px); }
-    h1 { font-size: 20px; margin-bottom: 12px; }
-
-    .status {
-      font-size: 16px; font-weight: 700; text-align: center;
-      padding: 14px; border-radius: 10px; margin: 12px 0;
-      background: #333; color: #ccc;
-    }
-    .status.playing { background: #1b5e20; color: #a5d6a7; }
-
-    .timer {
-      font-size: 44px; font-weight: 300; text-align: center;
-      font-variant-numeric: tabular-nums; margin: 12px 0; color:#fff;
-    }
-
-    button {
-      display: block; width: 100%; padding: 16px;
-      font-size: 17px; font-weight: 700; border: none; border-radius: 10px;
-      cursor: pointer; margin-bottom: 10px; -webkit-tap-highlight-color: transparent;
-    }
-    .btn-go { background: #34c759; color: white; }
-    .btn-stop { background: #ff3b30; color: white; }
-    .btn-size { background: #555; color: white; }
-
-    .log {
-      background: #000; padding: 12px; border-radius: 8px;
-      font-family: ui-monospace, monospace; font-size: 11px;
-      max-height: 160px; overflow-y: auto; white-space: pre-wrap;
-      margin-top: 12px; color: #6f6;
-    }
-    .hint { font-size: 12px; color: #999; margin-top: 8px; line-height: 1.4; }
+    body { font-family: -apple-system, sans-serif; background:#111; color:#eee; padding:16px; padding-top: env(safe-area-inset-top,16px); }
+    h1 { font-size:18px; margin-bottom:12px; }
+    .yt-wrap { position:relative; width:100%; padding-bottom:56.25%; margin-bottom:16px; }
+    .yt-wrap iframe { position:absolute; top:0; left:0; width:100%; height:100%; border:0; border-radius:8px; }
+    .timer { font-size:44px; font-weight:300; text-align:center; font-variant-numeric:tabular-nums; margin:12px 0; }
+    .status { text-align:center; padding:12px; border-radius:8px; background:#333; margin:12px 0; font-weight:700; }
+    .log { background:#000; color:#6f6; padding:12px; border-radius:8px; font-family:monospace; font-size:11px; max-height:160px; overflow-y:auto; white-space:pre-wrap; margin-top:12px; }
+    .hint { font-size:12px; color:#999; line-height:1.5; margin-top:8px; }
   </style>
 </head>
 <body>
-  <!-- Big video at top -->
-  <video id="player" loop playsinline></video>
+  <h1>🎬 YouTube iframe Test</h1>
 
-  <div class="controls">
-    <h1>🎬 Big Video Wake Test</h1>
-
-    <div class="status" id="status">Stopped</div>
-    <div class="timer" id="timer">00:00</div>
-
-    <button class="btn-go" id="go-btn">▶ Start</button>
-    <button class="btn-stop" id="stop-btn" style="display:none;">⏹ Stop</button>
-    <button class="btn-size" id="size-btn">📐 Cycle size: 50vh</button>
-
-    <div class="hint">
-      Testing if a LARGE visible video keeps screen on (vs the tiny box that failed).
-      <br>Keep volume low but NOT muted (no mute symbol). Wait past auto-lock.
-    </div>
-
-    <div class="log" id="log">Ready…</div>
+  <div class="yt-wrap">
+    <!-- autoplay + playsinline; mute=0 so audio route is active -->
+    <iframe id="yt"
+      src="https://www.youtube.com/embed/RiwCzRnaTkg?autoplay=1&playsinline=1&mute=0&controls=1&loop=1&playlist=RiwCzRnaTkg"
+      allow="autoplay; encrypted-media"
+      allowfullscreen>
+    </iframe>
   </div>
 
+  <div class="status" id="status">iframe loaded — press play in the video if not autoplaying</div>
+  <div class="timer" id="timer">00:00</div>
+
+  <div class="hint">
+    1. If the video doesn't autoplay, tap play inside it.<br>
+    2. Keep volume low but NOT muted (no mute symbol).<br>
+    3. Pocket the phone, wait past auto-lock.<br>
+    4. Screen stays on?
+  </div>
+
+  <div class="log" id="log">Ready…</div>
+
   <script>
-    const player  = document.getElementById('player');
-    const statusEl = document.getElementById('status');
-    const timerEl  = document.getElementById('timer');
-    const logEl    = document.getElementById('log');
-    const goBtn    = document.getElementById('go-btn');
-    const stopBtn  = document.getElementById('stop-btn');
-    const sizeBtn  = document.getElementById('size-btn');
-
-    let startTime = null;
-    let timerInterval = null;
+    const logEl = document.getElementById('log');
+    const timerEl = document.getElementById('timer');
     let lastVisible = Date.now();
+    let start = Date.now();
 
-    // Size cycling to find the threshold
-    const sizes = ['50vh', '100vh', '200px', '56px', '2px'];
-    let sizeIndex = 0;
+    function log(m){ const t=new Date().toLocaleTimeString(); logEl.textContent=`[${t}] ${m}\n`+logEl.textContent; }
 
-    function log(msg) {
-      const t = new Date().toLocaleTimeString();
-      logEl.textContent = `[${t}] ${msg}\n` + logEl.textContent;
-    }
-
-    function updateTimer() {
-      if (!startTime) return;
-      const e = Math.floor((Date.now() - startTime) / 1000);
-      timerEl.textContent =
-        `${String(Math.floor(e/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`;
-    }
-
-    async function start() {
-      try {
-        player.src = 'keepawake.mp4';
-        player.loop = true;
-        player.muted = false;
-        player.volume = 1.0;
-
-        await player.play();
-
-        startTime = Date.now();
-        timerInterval = setInterval(updateTimer, 250);
-        statusEl.textContent = '🎬 Playing — screen should stay ON';
-        statusEl.className = 'status playing';
-        goBtn.style.display = 'none';
-        stopBtn.style.display = 'block';
-
-        log(`▶ Playing, size=${player.style.height || '50vh'}, muted=${player.muted}`);
-      } catch (err) {
-        log(`❌ Play failed: ${err.message}`);
-        statusEl.textContent = '❌ Could not play';
-      }
-    }
-
-    function stop() {
-      player.pause();
-      player.currentTime = 0;
-      clearInterval(timerInterval);
-      startTime = null;
-      timerEl.textContent = '00:00';
-      statusEl.textContent = 'Stopped';
-      statusEl.className = 'status';
-      goBtn.style.display = 'block';
-      stopBtn.style.display = 'none';
-      log('⏹ Stopped');
-    }
-
-    function cycleSize() {
-      sizeIndex = (sizeIndex + 1) % sizes.length;
-      const newSize = sizes[sizeIndex];
-      player.style.height = newSize;
-      if (newSize === '2px' || newSize === '56px') {
-        player.style.width = newSize;
-        player.style.position = 'fixed';
-        player.style.bottom = '10px';
-        player.style.right = '10px';
-        player.style.opacity = (newSize === '2px') ? '0.01' : '1';
-      } else {
-        player.style.width = '100%';
-        player.style.position = 'static';
-        player.style.opacity = '1';
-      }
-      sizeBtn.textContent = `📐 Cycle size: ${newSize}`;
-      log(`📐 Size changed to ${newSize}`);
-    }
-
-    goBtn.addEventListener('click', start);
-    stopBtn.addEventListener('click', stop);
-    sizeBtn.addEventListener('click', cycleSize);
+    setInterval(() => {
+      const e = Math.floor((Date.now()-start)/1000);
+      timerEl.textContent = `${String(Math.floor(e/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`;
+    }, 500);
 
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
-        log('📵 Page hidden');
-      } else {
-        const h = Math.floor((Date.now() - lastVisible) / 1000);
-        log(`📱 Page visible (hidden ~${h}s), paused=${player.paused}`);
-      }
+      if (document.hidden) log('📵 Page hidden (screen locked)');
+      else { const h=Math.floor((Date.now()-lastVisible)/1000); log(`📱 Visible (hidden ~${h}s)`); }
       lastVisible = Date.now();
     });
 
-    player.addEventListener('pause', () => { if (startTime) log('⚠️ PAUSED by iOS?'); });
-    player.addEventListener('loadedmetadata', () =>
-      log(`📂 Loaded: ${player.videoWidth}x${player.videoHeight}`));
-    player.addEventListener('error', () =>
-      log(`❌ Error: ${player.error?.message || 'unknown'}`));
-
-    log('Tap Start. Video is 50vh (half screen). Use Cycle Size to test thresholds.');
+    log(`UA: ${navigator.userAgent.slice(0,60)}...`);
+    log('YouTube iframe should autoplay. If not, tap play.');
   </script>
 </body>
 </html>
