@@ -1,37 +1,29 @@
 /**
  * Centerline — Offline ready toast
  *
- * Shows a brief toast the first time the service worker finishes
- * installing, confirming the app is available offline.
+ * Shows once on first launch after the service worker installs.
+ * Uses localStorage so it persists across app closes/reopens.
  */
 
 const STORAGE_KEY = 'cl_offline_ready_shown';
 
-/**
- * Call once from main.js after init.
- * Listens for the service worker to become ready, then shows a toast
- * (but only once per install — not on every page load).
- */
 export function listenForOfflineReady() {
   if (!('serviceWorker' in navigator)) return;
 
-  navigator.serviceWorker.ready.then((registration) => {
-    // Only show toast if this is a genuinely new install/activation,
-    // not every time the page loads with an already-active SW.
-    const alreadyShown = sessionStorage.getItem(STORAGE_KEY);
-    if (alreadyShown) return;
+  // Already shown on a previous launch — skip entirely
+  if (localStorage.getItem(STORAGE_KEY)) return;
 
-    // Mark as shown for this browser session
-    sessionStorage.setItem(STORAGE_KEY, '1');
-
-    // Small delay so the app UI renders first
+  navigator.serviceWorker.ready.then(() => {
+    // Mark before showing so rapid re-renders don't double-show
+    localStorage.setItem(STORAGE_KEY, '1');
     setTimeout(() => showOfflineReadyToast(), 1500);
   });
 }
 
 function showOfflineReadyToast() {
-  // Don't stack toasts
   if (document.getElementById('cl-offline-toast')) return;
+
+  const message = 'App ready — open from your Home Screen icon once to enable offline use';
 
   const toast = document.createElement('div');
   toast.id = 'cl-offline-toast';
@@ -39,34 +31,35 @@ function showOfflineReadyToast() {
   toast.setAttribute('aria-live', 'polite');
   toast.innerHTML = `
     <span class="cl-toast-icon">✓</span>
-    <span class="cl-toast-msg">App ready — works offline</span>
+    <span class="cl-toast-msg">${message}</span>
   `;
 
   Object.assign(toast.style, {
-    position:        'fixed',
-    bottom:          'calc(24px + env(safe-area-inset-bottom, 0px))',
-    left:            '50%',
-    transform:       'translateX(-50%) translateY(16px)',
-    background:      '#2e7d32',
-    color:           '#fff',
-    padding:         '10px 18px',
-    borderRadius:    '8px',
-    fontSize:        '14px',
-    fontWeight:      '500',
-    display:         'flex',
-    alignItems:      'center',
-    gap:             '8px',
-    zIndex:          '9999',
-    opacity:         '0',
-    transition:      'opacity 0.3s ease, transform 0.3s ease',
-    whiteSpace:      'nowrap',
-    boxShadow:       '0 2px 12px rgba(0,0,0,0.3)',
-    pointerEvents:   'none',
+    position:      'fixed',
+    bottom:        'calc(24px + env(safe-area-inset-bottom, 0px))',
+    left:          '50%',
+    transform:     'translateX(-50%) translateY(16px)',
+    background:    '#2e7d32',
+    color:         '#fff',
+    padding:       '10px 18px',
+    borderRadius:  '8px',
+    fontSize:      '14px',
+    fontWeight:    '500',
+    display:       'flex',
+    alignItems:    'flex-start',
+    gap:           '8px',
+    zIndex:        '9999',
+    opacity:       '0',
+    transition:    'opacity 0.3s ease, transform 0.3s ease',
+    whiteSpace:    'normal',
+    maxWidth:      '320px',
+    lineHeight:    '1.4',
+    boxShadow:     '0 2px 12px rgba(0,0,0,0.3)',
+    pointerEvents: 'none',
   });
 
   document.body.appendChild(toast);
 
-  // Animate in
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       toast.style.opacity = '1';
@@ -74,10 +67,9 @@ function showOfflineReadyToast() {
     });
   });
 
-  // Dismiss after 3 s
   setTimeout(() => {
     toast.style.opacity = '0';
     toast.style.transform = 'translateX(-50%) translateY(8px)';
     setTimeout(() => toast.remove(), 350);
-  }, 3000);
+  }, 6000);
 }
