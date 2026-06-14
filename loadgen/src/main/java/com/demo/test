@@ -1,75 +1,244 @@
+// src/db/store.js
+export async function createSession({ routineId, routineTitle, totalExercises, totalSets }) {
+  const db = await getDB();
+  const session = {
+    id: generateId(),
+    routineId,
+    routineTitle,
+    startedAt: Date.now(),
+    completedAt: null,
+    status: 'in-progress',
+    totalElapsed: 0,
+    exercisesCompleted: 0,
+    totalExercises,
+    setsCompleted: 0,
+    totalSets,
+    // Resume fields — updated on every phase transition
+    lastExerciseId: null,
+    lastExerciseName: null,
+    lastExerciseIndex: 0,
+    lastSet: 1,
+    lastPhase: null,
+    lastTimeRemaining: 0,
+    lastSavedAt: Date.now(),
+  };
+  await db.put(STORE_SESSIONS, session);
+  return session;
+}
+
 /**
- * Centerline — Offline ready toast
- *
- * Shows once on first launch after the service worker installs.
- * Uses localStorage so it persists across app closes/reopens.
+ * Returns the most recent in-progress session for a given routine,
+ * if it exists and is less than 4 hours old. Otherwise returns null.
  */
+export async function findResumableSession(routineId) {
+  const db = await getDB();
+  const all = await db.getAllFromIndex(STORE_SESSIONS, 'routineId', routineId);
+  const MAX_AGE_MS = 4 * 60 * 60 * 1000;  // 4 hours
+  const now = Date.now();
 
-const STORAGE_KEY = 'cl_offline_ready_shown';
+  // Find the most recent in-progress session for this routine
+  const candidate = all
+    .filter(s =>
+      s.status === 'in-progress' &&
+      s.lastPhase !== null &&
+      (now - s.startedAt) < MAX_AGE_MS
+    )
+    .sort((a, b) => b.startedAt - a.startedAt)[0];
 
-export function listenForOfflineReady() {
-  if (!('serviceWorker' in navigator)) return;
-
-  // Already shown on a previous launch — skip entirely
-  if (localStorage.getItem(STORAGE_KEY)) return;
-
-  navigator.serviceWorker.ready.then(() => {
-    // Mark before showing so rapid re-renders don't double-show
-    localStorage.setItem(STORAGE_KEY, '1');
-    setTimeout(() => showOfflineReadyToast(), 1500);
-  });
+  return candidate || null;
 }
 
-function showOfflineReadyToast() {
-  if (document.getElementById('cl-offline-toast')) return;
+/**
+ * Marks all stale in-progress sessions as abandoned.
+ * Call once on app startup to clean up crash/close leftovers.
+ */
+export async function abandonStaleSessions() {
+  const db = await getDB();
+  const all = await db.getAll(STORE_SESSIONS);
+  const MAX_AGE_MS = 4 * 60 * 60 * 1000;
+  const now = Date.now();
 
-  const message = 'App ready — open from your Home Screen icon once to enable offline use';
+  const stale = all.filter(s =>
+    s.status === 'in-progress' &&
+    (now - s.startedAt) >= MAX_AGE_MS
+  );
 
-  const toast = document.createElement('div');
-  toast.id = 'cl-offline-toast';
-  toast.setAttribute('role', 'status');
-  toast.setAttribute('aria-live', 'polite');
-  toast.innerHTML = `
-    <span class="cl-toast-icon">✓</span>
-    <span class="cl-toast-msg">${message}</span>
-  `;
-
-  Object.assign(toast.style, {
-    position:      'fixed',
-    bottom:        'calc(24px + env(safe-area-inset-bottom, 0px))',
-    left:          '50%',
-    transform:     'translateX(-50%) translateY(16px)',
-    background:    '#2e7d32',
-    color:         '#fff',
-    padding:       '10px 18px',
-    borderRadius:  '8px',
-    fontSize:      '14px',
-    fontWeight:    '500',
-    display:       'flex',
-    alignItems:    'flex-start',
-    gap:           '8px',
-    zIndex:        '9999',
-    opacity:       '0',
-    transition:    'opacity 0.3s ease, transform 0.3s ease',
-    whiteSpace:    'normal',
-    maxWidth:      '320px',
-    lineHeight:    '1.4',
-    boxShadow:     '0 2px 12px rgba(0,0,0,0.3)',
-    pointerEvents: 'none',
-  });
-
-  document.body.appendChild(toast);
-
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      toast.style.opacity = '1';
-      toast.style.transform = 'translateX(-50%) translateY(0)';
+  for (const s of stale) {
+    await db.put(STORE_SESSIONS, {
+      ...s,
+      status: 'abandoned',
+      completedAt: now,
     });
+  }
+
+  if (stale.length > 0) {
+    console.log(`[Store] Marked ${stale.length} stale session(s) as abandoned`);
+  }
+}
+
+// Add resumeFromSnapshot() to sessionEngine.js
+// Add this method in the PUBLIC API section, after start():
+/**
+ * Resume from a persisted session record instead of starting from scratch.
+ * Transitions directly into the saved phase with the saved time remaining.
+ * The engine starts paused — caller should call resume() after first render.
+ *
+ * @param {object} snapshot  - a session record from findResumableSession()
+ */
+resumeFromSnapshot(snapshot) {
+  if (this.phase !== 'idle') {
+    console.warn('[SessionEngine] resumeFromSnapshot() called but phase is not idle:', this.phase);
+    return;
+  }
+
+  // Restore exercise/set position
+  this.currentExerciseIndex = snapshot.lastExerciseIndex;
+  this.currentSet = snapshot.lastSet;
+  this.totalElapsed = snapshot.totalElapsed;
+
+  // Set timing references as if we started 'totalElapsed' seconds ago
+  this._sessionStartTime = performance.now() - (snapshot.totalElapsed * 1000);
+  this._totalPausedDuration = 0;
+
+  // Transition into the saved phase with the saved time remaining
+  this._transitionTo(snapshot.lastPhase, snapshot.lastTimeRemaining);
+
+  // Start ticking but immediately pause — player renders first, then calls resume()
+  this._startTicking();
+  this.pause();
+}
+
+
+  // --- Check for a resumable in-progress session ---
+  let resuming = false;
+  let resumeSnapshot = null;
+
+  try {
+    resumeSnapshot = await findResumableSession(routine.id);
+  } catch (err) {
+    console.warn('[Player] Could not check for resumable session:', err);
+  }
+
+  if (resumeSnapshot) {
+    const exercise = routine.exercises[resumeSnapshot.lastExerciseIndex];
+    const exerciseName = resumeSnapshot.lastExerciseName || (exercise ? exercise.name : 'last exercise');
+
+    const ageMs = Date.now() - (resumeSnapshot.lastSavedAt || resumeSnapshot.startedAt);
+    const ageMin = Math.floor(ageMs / 60000);
+    const ageLabel = ageMin < 1 ? 'just now'
+      : ageMin === 1 ? '1 minute ago'
+      : `${ageMin} minutes ago`;
+
+    const wantResume = await confirmModal({
+      title: 'Resume session?',
+      message: `You were doing "${exerciseName}" (set ${resumeSnapshot.lastSet}) — paused ${ageLabel}. Resume where you left off?`,
+      confirmLabel: 'Resume',
+      cancelLabel: 'Start fresh',
+    });
+
+    if (location.hash !== expectedPath) return;  // navigated away during modal
+
+    if (wantResume) {
+      resuming = true;
+      activeSession = {
+        id: resumeSnapshot.id,
+        setsCompleted: resumeSnapshot.setsCompleted,
+        exercisesCompleted: resumeSnapshot.exercisesCompleted,
+      };
+      console.log('[Player] Resuming session:', resumeSnapshot.id);
+    } else {
+      // User chose "Start fresh" — mark old session as abandoned
+      try {
+        await updateSession(resumeSnapshot.id, {
+          status: 'abandoned',
+          completedAt: Date.now(),
+        });
+        console.log('[Player] Old session abandoned, starting fresh');
+      } catch (err) {
+        console.warn('[Player] Could not abandon old session:', err);
+      }
+    }
+  }
+
+  // --- Create new session or reuse resumed one ---
+  if (!resuming) {
+    const totalSets = routine.exercises.reduce((sum, ex) => sum + (ex.sets || 1), 0);
+    try {
+      activeSession = await createSession({
+        routineId: routine.id,
+        routineTitle: routine.title,
+        totalExercises: routine.exercises.length,
+        totalSets,
+      });
+      console.log('[Player] Session started:', activeSession.id);
+    } catch (err) {
+      console.warn('[Player] Could not create session record:', err);
+    }
+  }
+
+// src/views/player.js
+Add imports
+
+// Replace the session creation + engine.start() block in renderPlayer()
+
+  // Acquire wake lock (best effort)
+  await acquireWakeLock();
+
+  // Stash routine so visibility handler can re-order
+  activeRoutine = routine;
+
+  // Set up a visibility handler - auto-pause when user backgrounds the app
+  visibilityHandler = () => handleVisibilityChange(container);
+  document.addEventListener('visibilitychange', visibilityHandler);
+
+  // --- Start or resume the engine ---
+  if (resuming && resumeSnapshot) {
+    engine.resumeFromSnapshot(resumeSnapshot);
+    // Engine is now paused at the saved phase — render first, then resume
+    renderPlayerUI(container, routine, engine.getState());
+    engine.resume();
+  } else {
+    engine.start();
+  }
+}
+
+
+// Update the phaseChange subscriber to save resume fields
+// In the unsubPhase handler, add the updateSession call after the existing tracking logic:
+
+  const unsubPhase = engine.on('phaseChange', (data) => {
+    if (data.to === 'complete') return;  // handled by 'complete' event
+
+    // Track session progress
+    if (data.from === 'work' && activeSession) {
+      activeSession.setsCompleted += 1;
+      if (data.to === 'rest-exercise') {
+        activeSession.exercisesCompleted += 1;
+      }
+    }
+
+    // --- Save resume state on every phase transition ---
+    if (activeSession && activeRoutine) {
+      const state = data.state;
+      const exercise = state.currentExercise;
+      updateSession(activeSession.id, {
+        totalElapsed: state.totalElapsed,
+        setsCompleted: activeSession.setsCompleted,
+        exercisesCompleted: activeSession.exercisesCompleted,
+        lastExerciseId: exercise ? exercise.id : null,
+        lastExerciseName: exercise ? exercise.name : null,
+        lastExerciseIndex: state.currentExerciseIndex,
+        lastSet: state.currentSet,
+        lastPhase: data.to,
+        lastTimeRemaining: Math.max(1, Math.ceil(state.timeRemaining)),
+        lastSavedAt: Date.now(),
+      }).catch(err => console.warn('[Player] Could not save resume state:', err));
+    }
+
+    // Fire phase-start cue
+    const context = buildCueContext(data, routine);
+    cues.cuePhaseStart(data.to, context);
+
+    renderPlayerUI(container, routine, data.state);
   });
 
-  setTimeout(() => {
-    toast.style.opacity = '0';
-    toast.style.transform = 'translateX(-50%) translateY(8px)';
-    setTimeout(() => toast.remove(), 350);
-  }, 6000);
-}
