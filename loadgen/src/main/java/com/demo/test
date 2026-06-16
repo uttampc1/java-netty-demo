@@ -1,53 +1,168 @@
-/**
- * Three-outcome resume prompt.
- * Returns 'resume' | 'fresh' | 'back'
- * 
- * 'back'   — user dismissed (×, backdrop, Escape) → navigate back, do nothing
- * 'resume' — user wants to continue the interrupted session
- * 'fresh'  — user wants to start a new session (abandons the old one)
- */
-async function showResumePrompt({ exerciseName, setNumber, ageLabel }) {
-  return new Promise((resolve) => {
-    const content = document.createElement('div');
-    content.className = 'dialog-content';
-    content.innerHTML = `
-      <p class="dialog-message">
-        You were doing <strong>${escapeHtml(exerciseName)}</strong> 
-        (set ${setNumber}) — paused ${escapeHtml(ageLabel)}.
-      </p>
+// src/views/routineDetail.js
+function renderExerciseItem(exercise, position) {
+  const video = parseVideoUrl(exercise.videoUrl);
+  const videoLink = video
+    ? `<a href="${escapeHtml(video.originalUrl)}" target="_blank" rel="noopener noreferrer" class="video-link">▶ Watch demonstration</a>`
+    : '';
 
-      <div class="dialog-actions" style="flex-direction: column; gap: 8px;">
-        <button type="button" class="btn btn-primary" id="resume-btn" style="width: 100%;">
-          Resume where I left off
-        </button>
-        <button type="button" class="btn btn-secondary" id="fresh-btn" style="width: 100%;">
-          Start fresh
-        </button>
+  const restNote = exercise.sets > 1 && exercise.restBetweenSets > 0
+    ? ` · ${exercise.restBetweenSets}s rest`
+    : '';
+
+  return `
+    <article class="exercise-detail-item" data-exercise-id="${escapeHtml(exercise.id)}">
+      <div class="exercise-position">${position}</div>
+      <div class="exercise-detail-main">
+        <h4 class="exercise-detail-name">${escapeHtml(exercise.name)}</h4>
+        ${exercise.description ? `<p class="exercise-detail-desc">${escapeHtml(exercise.description)}</p>` : ''}
+        <p class="exercise-detail-meta">
+          ${exercise.workDuration}s hold × ${exercise.sets} set${exercise.sets === 1 ? '' : 's'}${restNote}
+        </p>
+        ${videoLink}
       </div>
-    `;
+      <button
+        type="button"
+        class="exercise-play-btn"
+        data-exercise-id="${escapeHtml(exercise.id)}"
+        aria-label="Play ${escapeHtml(exercise.name)}"
+        title="Play this exercise"
+      >▶</button>
+    </article>
+  `;
+}
 
-    let resolved = false;
-    const finish = (decision) => {
-      if (resolved) return;
-      resolved = true;
-      closeModal(modal);
-      resolve(decision);
-    };
+// 1b. Wire play buttons after container.innerHTML
+//In renderRoutineDetail, after the existing handler block (after the #delete-btn listener), add
+  // Wire individual exercise play buttons
+  container.querySelectorAll('.exercise-play-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const exerciseId = btn.dataset.exerciseId;
+      if (exerciseId) {
+        unlockAudio();
+        router.navigate(`/play/${routine.id}/exercise/${exerciseId}`);
+      }
+    });
+  });
 
-    const modal = openModal({
-      title: 'Resume session?',
-      content,
-      dismissable: true,
-      onClose: (reason) => {
-        // '×' button, backdrop click, Escape, popstate → go back
-        if (!resolved) {
-          resolved = true;
-          resolve('back');
-        }
-      },
+// src/main.js
+    // Single-exercise playback
+    router.register('/play/:routineId/exercise/:exerciseId', async (params) => {
+      await renderPlayer(app, params.routineId, { exerciseId: params.exerciseId });
     });
 
-    content.querySelector('#resume-btn').addEventListener('click', () => finish('resume'));
-    content.querySelector('#fresh-btn').addEventListener('click', () => finish('fresh'));
-  });
+// src/views/player.js
+// 3a. Update the function signature (line 33)
+export async function renderPlayer(container, routineId, options = {}) {
+  const { exerciseId = null } = options;
+  const isSingleExercise = Boolean(exerciseId);
+
+  // --- Single-exercise mode ---
+  if (isSingleExercise) {
+    const targetExercise = routine.exercises.find(ex => ex.id === exerciseId);
+    if (!targetExercise) {
+      await alertModal({
+        title: 'Exercise not found',
+        message: 'That exercise no longer exists in this routine.',
+      });
+      router.navigate(`/routine/${routineId}`);
+      return;
+    }
+    // Replace routine with a synthetic single-exercise version
+    routine = {
+      ...routine,
+      exercises: [targetExercise],
+      restBetweenExercises: 0,
+      _isSingleExercise: true,
+      _singleExerciseName: targetExercise.name,
+      _parentRoutineId: routine.id,
+    };
+  }
+
+// 
+// Find the findResumableSession block and replace it:
+
+  let resumeSnapshot = null;
+  try {
+    // Use the parent routine ID for the query (single-exercise sessions
+    // are stored under the real routineId)
+    const queryRoutineId = routine._parentRoutineId || routine.id;
+    const candidate = await findResumableSession(queryRoutineId);
+    if (candidate) {
+      if (isSingleExercise) {
+        // Only resume if it was a single-exercise session for THIS specific exercise
+        if (candidate.mode === 'single-exercise' && candidate.lastExerciseId === exerciseId) {
+          resumeSnapshot = candidate;
+        }
+      } else {
+        // Full routine: only resume full-routine sessions
+        if (!candidate.mode || candidate.mode === 'full-routine') {
+          resumeSnapshot = candidate;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[Player] Could not check for resumable session:', err);
+  }
+
+// Find the createSession call and update it:
+    activeSession = await createSession({
+      routineId: routine._parentRoutineId || routine.id,
+      routineTitle: routine._isSingleExercise
+        ? routine._singleExerciseName
+        : routine.title,
+      totalExercises: routine.exercises.length,
+      totalSets: routine.exercises.reduce((sum, ex) => sum + (ex.sets || 1), 0),
+      mode: routine._isSingleExercise ? 'single-exercise' : 'full-routine',
+    });
+
+// In renderPlayerUI, find the player-top section and update:
+      <div class="player-top">
+        <div class="player-routine-title">
+          ${escapeHtml(routine._isSingleExercise ? routine._singleExerciseName : routine.title)}
+        </div>
+        <div class="player-exercise-progress">
+          ${routine._isSingleExercise
+            ? 'Single Exercise'
+            : `Exercise ${state.currentExerciseIndex + 1} of ${state.totalExercises}`}
+        </div>
+      </div>
+
+//  Update renderCompletionScreen title
+
+// Add mode field to createSession db/store.js
+
+// style.css
+/* ── Exercise play button ───────────────────────────────── */
+.exercise-detail-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  position: relative;
 }
+
+.exercise-play-btn {
+  flex-shrink: 0;
+  align-self: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 2px solid var(--color-accent, #34c759);
+  background: transparent;
+  color: var(--color-accent, #34c759);
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+  padding: 0;
+  line-height: 1;
+}
+
+.exercise-play-btn:hover,
+.exercise-play-btn:active {
+  background: var(--color-accent, #34c759);
+  color: #fff;
+}
+
