@@ -1,1 +1,93 @@
+Good addition.
 
+Housewives / homemakers are a real segment with specific credit challenges:
+- income may be spouse's
+- no independent credit history
+- may not know they can build credit separately
+- often become financially vulnerable if relationship changes
+
+Adding to README now:
+
+---
+
+```markdown
+# CreditStart
+
+**Build your credit from zero — a step-by-step guide for first-time adults.**
+
+---
+
+## What it is
+
+A simple web app (PWA) that helps students, recent grads,
+first-time earners, and homemakers understand how to start
+building credit safely — with a personalized action plan.
+
+---
+
+## Problem
+
+Many people have no credit history and no clear starting
+point. Existing tools assume users already have credit
+cards, scores, or accounts.
+
+---
+
+## Solution
+
+An 8-question onboarding quiz → personalized credit-start roadmap.
+
+---
+
+## Target Users (v1)
+
+- College students
+- Recent graduates
+- First-job young adults
+- Gig workers
+- Homemakers / housewives
+
+---
+
+## Result Types
+
+1. Starting From Zero
+2. Thin File Beginner
+3. Rejected / Unsure
+4. Early Builder
+5. Homemaker / Dependent Income  ← new
+
+---
+
+## Homemaker Notes
+
+- May have joint account but no independent credit
+- Can be added as authorized user on spouse's card
+- Secured card in own name is possible
+- Independent credit history matters for financial security
+
+---
+
+## MVP Features
+
+- [ ] Landing page
+- [ ] 8-question quiz (updated for homemaker path)
+- [ ] 5 result types
+- [ ] Personalized roadmap
+- [ ] Email capture
+- [ ] PWA support
+
+---
+
+## Next Steps
+
+- [ ] Update quiz logic for homemaker path
+- [ ] Build landing page
+- [ ] Build quiz flow
+- [ ] Build result pages
+- [ ] Test with real users
+```
+
+---
+
+Want to update the quiz logic next to add the homemaker path?
