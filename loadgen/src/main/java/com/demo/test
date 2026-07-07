@@ -5,165 +5,152 @@ const results = {
     title: "You're starting at the very beginning — that's okay.",
     summary: "You don't have a credit file yet. That's more common than you think. Here's your clear starting path.",
     steps: [
-      { icon: "🏦", text: "Open a checking account in your own name — it's your foundation." },
-      { icon: "💳", text: "Apply for one secured credit card — easier to get, builds real history." },
-      { icon: "📅", text: "Set autopay so you never miss a payment." },
-      { icon: "📉", text: "Keep your balance below 30% of the card limit." },
-      { icon: "⏳", text: "Wait 3–6 months, then check your progress." }
+      {
+        icon: "🏦",
+        text: "Open a checking account in your own name — try a local <a href='https://www.mycreditunion.gov/about-credit-unions/credit-union-locator' target='_blank' rel='noopener'>credit union</a> or a fee-free bank like <a href='https://www.ally.com/' target='_blank' rel='noopener'>Ally</a>."
+      },
+      {
+        icon: "💳",
+        text: "Apply for <strong>one</strong> secured credit card — good beginner options: <a href='https://www.discover.com/credit-cards/secured/' target='_blank' rel='noopener'>Discover Secured</a> or <a href='https://www.capitalone.com/credit-cards/secured-mastercard/' target='_blank' rel='noopener'>Capital One Secured</a>. <a href='https://www.consumerfinance.gov/ask-cfpb/what-is-a-secured-credit-card-en-43/' target='_blank' rel='noopener'>What is a secured card?</a>"
+      },
+      {
+        icon: "📅",
+        text: "Set autopay so you never miss a payment — even the minimum."
+      },
+      {
+        icon: "📉",
+        text: "Keep your balance below 30% of the card limit each month."
+      },
+      {
+        icon: "⏳",
+        text: "Wait 3–6 months, then check your free report at <a href='https://www.annualcreditreport.com' target='_blank' rel='noopener'>annualcreditreport.com</a>."
+      }
     ],
-    avoid: "Avoid applying for multiple cards at once — each application leaves a mark.",
+    avoid: "Avoid applying for multiple cards at once — each application leaves a mark on your report.",
     timeline: "First results visible: 3–6 months"
   },
+
   thin: {
     badge: "Thin File Beginner",
     emoji: "📄",
     title: "You have a small start — now build on it.",
     summary: "You have a little history but not much yet. Consistent simple habits over the next few months will move the needle.",
     steps: [
-      { icon: "✅", text: "Pay every account on time — this is the single most important factor." },
-      { icon: "📉", text: "Keep credit usage below 30% on all cards." },
-      { icon: "🚫", text: "Don't open multiple new accounts at once." },
-      { icon: "🔍", text: "Check your credit report for errors — free at annualcreditreport.com." },
-      { icon: "⏳", text: "6 months of consistent habits before applying for anything new." }
+      {
+        icon: "✅",
+        text: "Pay every account on time — this is the single most important factor. Set autopay if you haven't."
+      },
+      {
+        icon: "📉",
+        text: "Keep credit usage below 30% on all cards."
+      },
+      {
+        icon: "🚫",
+        text: "Don't open multiple new accounts at once."
+      },
+      {
+        icon: "🔍",
+        text: "Check your free credit report for errors at <a href='https://www.annualcreditreport.com' target='_blank' rel='noopener'>annualcreditreport.com</a> — errors are more common than you'd think."
+      },
+      {
+        icon: "🏦",
+        text: "If you want to accelerate, ask your <a href='https://www.mycreditunion.gov/about-credit-unions/credit-union-locator' target='_blank' rel='noopener'>local credit union</a> about a <strong>credit-builder loan</strong> — a low-risk way to add history."
+      }
     ],
-    avoid: "Avoid closing old accounts — length of credit history matters.",
+    avoid: "Avoid closing old accounts — length of credit history matters for your score.",
     timeline: "Noticeable improvement: 4–8 months"
   },
+
   rejected: {
     badge: "Rejected / Unsure",
     emoji: "🔄",
     title: "A rejection is information — here's what to do next.",
     summary: "Being rejected stings, but it's fixable. Stop random applications and take a targeted approach.",
     steps: [
-      { icon: "🛑", text: "Stop applying for new cards right now — each hard pull hurts your score." },
-      { icon: "📋", text: "Get your free credit report and look for errors or negative marks." },
-      { icon: "🔒", text: "Apply for a secured card — approval is much easier and it builds real history." },
-      { icon: "📅", text: "Make on-time payments for 3–6 months before applying again." },
-      { icon: "📞", text: "Ask your bank about a credit-builder loan if a card isn't an option." }
+      {
+        icon: "🛑",
+        text: "Stop applying for new cards right now — each hard pull hurts your score temporarily."
+      },
+      {
+        icon: "📋",
+        text: "Get your free report at <a href='https://www.annualcreditreport.com' target='_blank' rel='noopener'>annualcreditreport.com</a> — look for errors, late payments, or accounts you don't recognise."
+      },
+      {
+        icon: "🔒",
+        text: "Apply for a secured card where approval is much easier: <a href='https://www.discover.com/credit-cards/secured/' target='_blank' rel='noopener'>Discover Secured</a> or <a href='https://www.capitalone.com/credit-cards/secured-mastercard/' target='_blank' rel='noopener'>Capital One Secured</a>."
+      },
+      {
+        icon: "🏦",
+        text: "Ask your <a href='https://www.mycreditunion.gov/about-credit-unions/credit-union-locator' target='_blank' rel='noopener'>local credit union</a> about a <strong>credit-builder loan</strong> — a safer alternative if cards feel risky."
+      },
+      {
+        icon: "📅",
+        text: "Make on-time payments for 3–6 months, then try again with a more targeted application."
+      }
     ],
-    avoid: "Avoid 'credit repair' services that charge fees — most are unnecessary.",
+    avoid: "Avoid 'credit repair' services that charge fees upfront — most are unnecessary and sometimes predatory.",
     timeline: "Ready to reapply: 3–6 months"
   },
+
   homemaker: {
     badge: "Homemaker / Dependent Income",
     emoji: "🛡️",
     title: "Building your own credit matters more than you think.",
     summary: "Having credit only through a spouse or family member leaves you financially vulnerable. Here's how to build independently.",
     steps: [
-      { icon: "👤", text: "Open a bank account in your own name if you haven't yet." },
-      { icon: "💳", text: "Apply for a secured credit card in your own name — you can qualify even without your own income." },
-      { icon: "🤝", text: "Being an authorized user on a spouse's card helps — but your own card matters too." },
-      { icon: "📅", text: "Pay your card on time every month, even if it's a small purchase." },
-      { icon: "🔍", text: "Check your own credit report — you may have more history than you think." }
+      {
+        icon: "👤",
+        text: "Open a bank account in your own name — a <a href='https://www.mycreditunion.gov/about-credit-unions/credit-union-locator' target='_blank' rel='noopener'>credit union</a> is often the friendliest starting point."
+      },
+      {
+        icon: "💳",
+        text: "Apply for a secured card in your own name — <a href='https://www.discover.com/credit-cards/secured/' target='_blank' rel='noopener'>Discover Secured</a> allows household income on the application. <a href='https://www.consumerfinance.gov/ask-cfpb/what-is-a-secured-credit-card-en-43/' target='_blank' rel='noopener'>Learn more.</a>"
+      },
+      {
+        icon: "🤝",
+        text: "Being an authorized user on a spouse's card helps — but your own account builds <em>your</em> independent file. <a href='https://www.consumerfinance.gov/ask-cfpb/how-do-i-get-and-keep-a-good-credit-history-en-74/' target='_blank' rel='noopener'>Why this matters.</a>"
+      },
+      {
+        icon: "📅",
+        text: "Pay your card on time every month, even if it's a small recurring purchase."
+      },
+      {
+        icon: "🔍",
+        text: "Check your own free credit report at <a href='https://www.annualcreditreport.com' target='_blank' rel='noopener'>annualcreditreport.com</a> — you may have more history than you realise."
+      }
     ],
-    avoid: "Avoid depending entirely on a joint account — it doesn't always build your individual credit.",
+    avoid: "Avoid depending entirely on a joint account — it doesn't always build your individual credit profile.",
     timeline: "Independent credit profile visible: 3–6 months"
   },
+
   builder: {
     badge: "Early Builder",
     emoji: "📈",
     title: "You have a start — now build it the right way.",
     summary: "You already have some credit history. The goal now is to keep it clean and grow it steadily.",
     steps: [
-      { icon: "✅", text: "Never miss a payment — perfect payment history is your biggest asset." },
-      { icon: "📉", text: "Keep utilization below 30% on all cards." },
-      { icon: "🚫", text: "Avoid unnecessary hard inquiries — only apply when you really need to." },
-      { icon: "📋", text: "Check your credit report once a year for errors." },
-      { icon: "⏳", text: "Let accounts age — older credit history helps your score." }
+      {
+        icon: "✅",
+        text: "Never miss a payment — perfect payment history is your single biggest scoring factor."
+      },
+      {
+        icon: "📉",
+        text: "Keep utilization below 30% on every card, not just overall."
+      },
+      {
+        icon: "🚫",
+        text: "Avoid unnecessary hard inquiries — only apply for new credit when you genuinely need it."
+      },
+      {
+        icon: "📋",
+        text: "Check your free report once a year at <a href='https://www.annualcreditreport.com' target='_blank' rel='noopener'>annualcreditreport.com</a> — dispute any errors you find."
+      },
+      {
+        icon: "🏦",
+        text: "Consider a <strong>credit-builder loan</strong> from a <a href='https://www.mycreditunion.gov/about-credit-unions/credit-union-locator' target='_blank' rel='noopener'>credit union</a> to diversify your credit mix."
+      }
     ],
-    avoid: "Avoid closing your oldest card even if you rarely use it.",
+    avoid: "Avoid closing your oldest card even if you rarely use it — age of accounts helps your score.",
     timeline: "Continued steady improvement over 6–12 months"
   }
 };
-
-
-function renderResult() {
-  const key = getResult(answers);
-  const r = results[key];
-
-  document.getElementById("stepCounter").textContent = "Your personalized plan";
-  document.getElementById("progressFill").style.width = "100%";
-
-  document.getElementById("quizCard").innerHTML = `
-    <div class="result-card">
-
-      <div class="result-emoji">${r.emoji}</div>
-      <div class="result-badge">${r.badge}</div>
-      <h2>${r.title}</h2>
-      <p class="summary">${r.summary}</p>
-
-      <ul class="steps-list">
-        ${r.steps.map(s => `
-          <li>
-            <span class="step-icon">${s.icon}</span>
-            <span>${s.text}</span>
-          </li>
-        `).join("")}
-      </ul>
-
-      <div class="avoid-box">
-        <span class="avoid-label">⚠️ Watch out:</span>
-        ${r.avoid}
-      </div>
-
-      <div class="timeline-box">
-        <span class="timeline-label">🗓️ Timeline:</span>
-        ${r.timeline}
-      </div>
-
-      <div class="email-section">
-        <p>📬 Get a monthly credit tip — free, no spam, unsubscribe anytime.</p>
-        <div class="email-row">
-          <input type="email" id="emailInput" placeholder="you@email.com" />
-          <button onclick="submitEmail()">Send me tips</button>
-        </div>
-        <p class="email-thanks" id="emailThanks">
-          ✅ Got it! We'll send your first tip soon.
-        </p>
-      </div>
-
-      <button class="restart-btn" onclick="restart()">↩ Start over</button>
-
-    </div>
-  `;
-}
-
-
-
-/* RESULT POLISH */
-.result-emoji {
-  font-size: 2.5rem;
-  margin-bottom: 0.5rem;
-}
-
-.avoid-box {
-  background: #fff7ed;
-  border: 1px solid #fed7aa;
-  border-radius: 10px;
-  padding: 0.85rem 1.1rem;
-  font-size: 0.88rem;
-  color: #92400e;
-  text-align: left;
-  margin-bottom: 0.75rem;
-}
-
-.avoid-label {
-  font-weight: 700;
-  margin-right: 0.35rem;
-}
-
-.timeline-box {
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
-  border-radius: 10px;
-  padding: 0.85rem 1.1rem;
-  font-size: 0.88rem;
-  color: #166534;
-  text-align: left;
-  margin-bottom: 1.5rem;
-}
-
-.timeline-label {
-  font-weight: 700;
-  margin-right: 0.35rem;
-}
