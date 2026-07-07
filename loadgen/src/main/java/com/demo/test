@@ -1,3 +1,14 @@
+device_name,device_type,brand_model,os_or_firmware,connection_type,wired_or_wifi,primary_user,purpose,always_on,important_services,notes
+main-router,router,Netgear R7900P,router-firmware,LAN/WAN,wifi+ethernet,home,network gateway,yes,DHCP/DNS/NAT,remote management off; no manual port forwarding
+linux-nuc,mini-pc,Intel NUC,Debian/other Linux,LAN,ethernet,home,lab/server,yes,Docker,has Kali VMs
+imac-debian,desktop,iMac,Debian,LAN,ethernet,home,daily use or admin,depends,unknown,confirm services later
+kali-vm-1,virtual-machine,VM,Kali,virtual,virtual,home,security learning,no,security tools,lab use only
+roku,streaming-device,Roku,device-firmware,LAN,wifi,home,streaming,depends,unknown,normal home device
+macbook,laptop,MacBook,macOS,LAN,wifi,home,personal use,no,unknown,portable device
+iphone-1,phone,iPhone,iOS,LAN,wifi,personal,mobile device,no,unknown,add one row per phone if you want
+weather-station,iot-device,unknown,device-firmware,LAN,wifi,home,sprinkler/weather,yes,unknown,IoT device
+
+
 # 16-Week Cybersecurity Workbook
 Time budget: 4–6 hours/week
 Goal: Build practical defensive network/system security skills and create a portable assessment workflow.
