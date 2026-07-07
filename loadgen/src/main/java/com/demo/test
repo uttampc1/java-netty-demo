@@ -1,1237 +1,169 @@
-Good addition.
-
-Housewives / homemakers are a real segment with specific credit challenges:
-- income may be spouse's
-- no independent credit history
-- may not know they can build credit separately
-- often become financially vulnerable if relationship changes
-
-Adding to README now:
-
----
-
-```markdown
-# CreditStart
-
-**Build your credit from zero — a step-by-step guide for first-time adults.**
-
----
-
-## What it is
-
-A simple web app (PWA) that helps students, recent grads,
-first-time earners, and homemakers understand how to start
-building credit safely — with a personalized action plan.
-
----
-
-## Problem
-
-Many people have no credit history and no clear starting
-point. Existing tools assume users already have credit
-cards, scores, or accounts.
-
----
-
-## Solution
-
-An 8-question onboarding quiz → personalized credit-start roadmap.
-
----
-
-## Target Users (v1)
-
-- College students
-- Recent graduates
-- First-job young adults
-- Gig workers
-- Homemakers / housewives
-
----
-
-## Result Types
-
-1. Starting From Zero
-2. Thin File Beginner
-3. Rejected / Unsure
-4. Early Builder
-5. Homemaker / Dependent Income  ← new
-
----
-
-## Homemaker Notes
-
-- May have joint account but no independent credit
-- Can be added as authorized user on spouse's card
-- Secured card in own name is possible
-- Independent credit history matters for financial security
-
----
-
-## MVP Features
-
-- [ ] Landing page
-- [ ] 8-question quiz (updated for homemaker path)
-- [ ] 5 result types
-- [ ] Personalized roadmap
-- [ ] Email capture
-- [ ] PWA support
-
----
-
-## Next Steps
-
-- [ ] Update quiz logic for homemaker path
-- [ ] Build landing page
-- [ ] Build quiz flow
-- [ ] Build result pages
-- [ ] Test with real users
-```
-
----
-
-Want to update the quiz logic next to add the homemaker path?
-
-
----------------
-QUIZ_LOGIC.md
-```markdown
-# Quiz Logic (Updated)
-
-## Questions
-
-### Q1. What best describes you right now?
-- Student
-- Employed (full-time or part-time)
-- Gig worker / freelancer
-- Homemaker / not working outside home
-- Recent grad / between jobs
-
-### Q2. Do you have a bank account in your own name?
-- Yes
-- No
-
-### Q3. Do you have a credit card in your own name?
-- Yes
-- No
-
-### Q4. Are you an authorized user on someone else's credit card?
-(spouse, parent, family member)
-- Yes
-- No
-- Not sure
-
-### Q5. Do you know your credit score?
-- Yes
-- No
-
-### Q6. Have you ever applied for credit and been rejected?
-- Yes
-- No
-- Never applied
-
-### Q7. Do you pay any regular bills?
-(rent, phone, utilities, subscriptions)
-- Yes, in my own name
-- Yes, but under someone else's name
-- No bills in my name
-
-### Q8. What is your main goal?
-- Start building credit from scratch
-- Understand why I was rejected
-- Build credit independently from my spouse/family
-- Improve what little credit I have
-
----
-
-## Result Logic
-
-### Starting From Zero
-IF:
-- no bank account AND
-- no own card AND
-- no authorized user AND
-- no known score
-
-### Thin File Beginner
-IF:
-- has bank account OR authorized user
-- no own card
-- no rejection
-
-### Rejected / Unsure
-IF:
-- rejected = Yes
-
-### Early Builder
-IF:
-- has own credit card
-- no rejection
-
-### Homemaker / Dependent Income  ← new
-IF:
-- Q1 = Homemaker
-- no own card
-- bills not in own name OR authorized user only
-
-OUTPUT focuses on:
-- building independent credit
-- secured card in own name
-- authorized user benefits and limits
-- why independent credit history matters
-```
-
----
-
-Want to start the landing page HTML next?
-
----
---> Landing PAGE (index.html)
-```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CreditStart — Build Credit From Zero</title>
-  <style>
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-        sans-serif;
-      background: #f9fafb;
-      color: #1a1a2e;
-      line-height: 1.6;
-    }
-
-    /* ── NAV ── */
-    nav {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 1rem 2rem;
-      background: #ffffff;
-      border-bottom: 1px solid #e5e7eb;
-    }
-
-    .logo {
-      font-size: 1.25rem;
-      font-weight: 700;
-      color: #2563eb;
-    }
-
-    nav a {
-      font-size: 0.9rem;
-      color: #6b7280;
-      text-decoration: none;
-    }
-
-    /* ── HERO ── */
-    .hero {
-      text-align: center;
-      padding: 5rem 1.5rem 4rem;
-      background: linear-gradient(135deg, #eff6ff 0%, #ffffff 100%);
-    }
-
-    .badge {
-      display: inline-block;
-      background: #dbeafe;
-      color: #1d4ed8;
-      font-size: 0.78rem;
-      font-weight: 600;
-      padding: 0.3rem 0.85rem;
-      border-radius: 999px;
-      margin-bottom: 1.25rem;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-    }
-
-    .hero h1 {
-      font-size: clamp(1.9rem, 5vw, 3rem);
-      font-weight: 800;
-      color: #111827;
-      max-width: 680px;
-      margin: 0 auto 1rem;
-    }
-
-    .hero h1 span {
-      color: #2563eb;
-    }
-
-    .hero p {
-      font-size: 1.1rem;
-      color: #4b5563;
-      max-width: 520px;
-      margin: 0 auto 2rem;
-    }
-
-    .cta-btn {
-      display: inline-block;
-      background: #2563eb;
-      color: #ffffff;
-      font-size: 1rem;
-      font-weight: 600;
-      padding: 0.85rem 2rem;
-      border-radius: 8px;
-      text-decoration: none;
-      transition: background 0.2s;
-    }
-
-    .cta-btn:hover {
-      background: #1d4ed8;
-    }
-
-    .cta-note {
-      margin-top: 0.75rem;
-      font-size: 0.82rem;
-      color: #9ca3af;
-    }
-
-    /* ── WHO IT'S FOR ── */
-    .who {
-      background: #ffffff;
-      padding: 3.5rem 1.5rem;
-      text-align: center;
-    }
-
-    .who h2 {
-      font-size: 1.5rem;
-      font-weight: 700;
-      margin-bottom: 2rem;
-      color: #111827;
-    }
-
-    .chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.75rem;
-      justify-content: center;
-      max-width: 600px;
-      margin: 0 auto;
-    }
-
-    .chip {
-      background: #f3f4f6;
-      color: #374151;
-      padding: 0.5rem 1.1rem;
-      border-radius: 999px;
-      font-size: 0.9rem;
-      font-weight: 500;
-    }
-
-    /* ── HOW IT WORKS ── */
-    .how {
-      padding: 4rem 1.5rem;
-      background: #f9fafb;
-      text-align: center;
-    }
-
-    .how h2 {
-      font-size: 1.5rem;
-      font-weight: 700;
-      margin-bottom: 2.5rem;
-      color: #111827;
-    }
-
-    .steps {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 1.5rem;
-      justify-content: center;
-      max-width: 860px;
-      margin: 0 auto;
-    }
-
-    .step {
-      background: #ffffff;
-      border: 1px solid #e5e7eb;
-      border-radius: 12px;
-      padding: 1.5rem 1.25rem;
-      flex: 1 1 220px;
-      max-width: 260px;
-      text-align: left;
-    }
-
-    .step-num {
-      font-size: 1.5rem;
-      font-weight: 800;
-      color: #2563eb;
-      margin-bottom: 0.5rem;
-    }
-
-    .step h3 {
-      font-size: 0.95rem;
-      font-weight: 700;
-      margin-bottom: 0.4rem;
-      color: #111827;
-    }
-
-    .step p {
-      font-size: 0.85rem;
-      color: #6b7280;
-    }
-
-    /* ── VALUE PROPS ── */
-    .value {
-      background: #ffffff;
-      padding: 4rem 1.5rem;
-      text-align: center;
-    }
-
-    .value h2 {
-      font-size: 1.5rem;
-      font-weight: 700;
-      margin-bottom: 2rem;
-      color: #111827;
-    }
-
-    .values-grid {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 1rem;
-      justify-content: center;
-      max-width: 760px;
-      margin: 0 auto;
-    }
-
-    .val-item {
-      background: #eff6ff;
-      border-radius: 10px;
-      padding: 1rem 1.25rem;
-      flex: 1 1 200px;
-      max-width: 230px;
-      text-align: left;
-    }
-
-    .val-icon {
-      font-size: 1.4rem;
-      margin-bottom: 0.4rem;
-    }
-
-    .val-item h3 {
-      font-size: 0.9rem;
-      font-weight: 700;
-      color: #1e40af;
-      margin-bottom: 0.25rem;
-    }
-
-    .val-item p {
-      font-size: 0.82rem;
-      color: #3b82f6;
-    }
-
-    /* ── QUOTE ── */
-    .quote-section {
-      background: #f9fafb;
-      padding: 3.5rem 1.5rem;
-      text-align: center;
-    }
-
-    blockquote {
-      font-size: 1.15rem;
-      font-style: italic;
-      color: #374151;
-      max-width: 540px;
-      margin: 0 auto 1rem;
-    }
-
-    .quote-attr {
-      font-size: 0.82rem;
-      color: #9ca3af;
-    }
-
-    /* ── BOTTOM CTA ── */
-    .bottom-cta {
-      background: #2563eb;
-      color: #ffffff;
-      text-align: center;
-      padding: 4rem 1.5rem;
-    }
-
-    .bottom-cta h2 {
-      font-size: 1.6rem;
-      font-weight: 800;
-      margin-bottom: 0.75rem;
-    }
-
-    .bottom-cta p {
-      font-size: 1rem;
-      margin-bottom: 2rem;
-      opacity: 0.85;
-    }
-
-    .cta-btn-white {
-      display: inline-block;
-      background: #ffffff;
-      color: #2563eb;
-      font-size: 1rem;
-      font-weight: 700;
-      padding: 0.85rem 2rem;
-      border-radius: 8px;
-      text-decoration: none;
-      transition: opacity 0.2s;
-    }
-
-    .cta-btn-white:hover {
-      opacity: 0.9;
-    }
-
-    /* ── FOOTER ── */
-    footer {
-      background: #111827;
-      color: #9ca3af;
-      text-align: center;
-      padding: 1.5rem;
-      font-size: 0.8rem;
-    }
-
-    footer a {
-      color: #6b7280;
-      text-decoration: none;
-      margin: 0 0.5rem;
-    }
-
-    /* ── RESPONSIVE ── */
-    @media (max-width: 600px) {
-      .steps,
-      .values-grid,
-      .chips {
-        flex-direction: column;
-        align-items: center;
-      }
-
-      .step,
-      .val-item {
-        max-width: 100%;
-      }
-    }
-  </style>
-</head>
-<body>
-
-  <!-- NAV -->
-  <nav>
-    <div class="logo">CreditStart</div>
-    <a href="#quiz">Get my free plan →</a>
-  </nav>
-
-  <!-- HERO -->
-  <section class="hero">
-    <div class="badge">Free · 2 minutes · No sign-up required</div>
-    <h1>Build your credit from <span>zero</span> — without the guesswork.</h1>
-    <p>
-      A simple, personalized plan for students, grads, homemakers,
-      and first-time earners who want to start building credit the right way.
-    </p>
-    <a href="#quiz" class="cta-btn">Get my free credit plan →</a>
-    <p class="cta-note">Answer 8 quick questions. Takes about 2 minutes.</p>
-  </section>
-
-  <!-- WHO IT'S FOR -->
-  <section class="who">
-    <h2>Who is this for?</h2>
-    <div class="chips">
-      <span class="chip">🎓 College students</span>
-      <span class="chip">💼 Recent graduates</span>
-      <span class="chip">🚗 Gig workers</span>
-      <span class="chip">🏠 Homemakers</span>
-      <span class="chip">👩‍💻 First-job young adults</span>
-      <span class="chip">🌎 New to the US</span>
-    </div>
-  </section>
-
-  <!-- HOW IT WORKS -->
-  <section class="how">
-    <h2>How it works</h2>
-    <div class="steps">
-      <div class="step">
-        <div class="step-num">01</div>
-        <h3>Answer 8 questions</h3>
-        <p>Tell us where you stand today — no account needed.</p>
-      </div>
-      <div class="step">
-        <div class="step-num">02</div>
-        <h3>Get your profile</h3>
-        <p>We identify your starting point based on your answers.</p>
-      </div>
-      <div class="step">
-        <div class="step-num">03</div>
-        <h3>Follow your plan</h3>
-        <p>A clear, step-by-step roadmap — no jargon, no confusion.</p>
-      </div>
-    </div>
-  </section>
-
-  <!-- VALUE PROPS -->
-  <section class="value">
-    <h2>What you'll get</h2>
-    <div class="values-grid">
-      <div class="val-item">
-        <div class="val-icon">📍</div>
-        <h3>Know where you stand</h3>
-        <p>Find out if you have a credit file — and what it means.</p>
-      </div>
-      <div class="val-item">
-        <div class="val-icon">🗺️</div>
-        <h3>A step-by-step plan</h3>
-        <p>Clear next steps — no overwhelming list of options.</p>
-      </div>
-      <div class="val-item">
-        <div class="val-icon">🚫</div>
-        <h3>Avoid common mistakes</h3>
-        <p>Learn what hurts your credit before you make the mistake.</p>
-      </div>
-      <div class="val-item">
-        <div class="val-icon">🔒</div>
-        <h3>Safe, not pushy</h3>
-        <p>We don't push products. We help you understand first.</p>
-      </div>
-    </div>
-  </section>
-
-  <!-- SOCIAL PROOF -->
-  <section class="quote-section">
-    <blockquote>
-      "Finally something that doesn't assume I already have
-      five credit cards and a mortgage."
-    </blockquote>
-    <p class="quote-attr">— Recent grad, Austin TX</p>
-  </section>
-
-  <!-- BOTTOM CTA -->
-  <section class="bottom-cta" id="quiz">
-    <h2>Ready to start building credit?</h2>
-    <p>Free. No account needed. Takes 2 minutes.</p>
-    <a href="quiz.html" class="cta-btn-white">Get my free credit plan →</a>
-  </section>
-
-  <!-- FOOTER -->
-  <footer>
-    <p>
-      © 2025 CreditStart &nbsp;|&nbsp;
-      <a href="#">Privacy</a>
-      <a href="#">Terms</a>
-    </p>
-    <p style="margin-top:0.4rem;">
-      Not financial advice. For education only.
-    </p>
-  </footer>
-
-</body>
-</html>
-==
---> quiz.html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CreditStart — Your Free Credit Plan</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #f9fafb;
-      color: #1a1a2e;
-      line-height: 1.6;
-    }
-
-    /* NAV */
-    nav {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 1rem 2rem;
-      background: #fff;
-      border-bottom: 1px solid #e5e7eb;
-    }
-    .logo { font-size: 1.25rem; font-weight: 700; color: #2563eb; }
-    nav a { font-size: 0.9rem; color: #6b7280; text-decoration: none; }
-
-    /* QUIZ WRAPPER */
-    .quiz-wrapper {
-      max-width: 600px;
-      margin: 3rem auto;
-      padding: 0 1.25rem;
-    }
-
-    /* PROGRESS BAR */
-    .progress-bar-bg {
-      background: #e5e7eb;
-      border-radius: 999px;
-      height: 6px;
-      margin-bottom: 2rem;
-    }
-    .progress-bar-fill {
-      background: #2563eb;
-      height: 6px;
-      border-radius: 999px;
-      transition: width 0.3s ease;
-    }
-
-    /* STEP COUNTER */
-    .step-counter {
-      font-size: 0.8rem;
-      color: #9ca3af;
-      margin-bottom: 0.5rem;
-      text-align: right;
-    }
-
-    /* QUESTION CARD */
-    .card {
-      background: #fff;
-      border: 1px solid #e5e7eb;
-      border-radius: 14px;
-      padding: 2rem 1.75rem;
-    }
-
-    .question-text {
-      font-size: 1.15rem;
-      font-weight: 700;
-      color: #111827;
-      margin-bottom: 1.5rem;
-    }
-
-    /* OPTIONS */
-    .options { display: flex; flex-direction: column; gap: 0.75rem; }
-
-    .option-btn {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      background: #f9fafb;
-      border: 2px solid #e5e7eb;
-      border-radius: 10px;
-      padding: 0.85rem 1.1rem;
-      font-size: 0.95rem;
-      color: #374151;
-      cursor: pointer;
-      transition: border-color 0.15s, background 0.15s;
-      text-align: left;
-      width: 100%;
-    }
-
-    .option-btn:hover {
-      border-color: #93c5fd;
-      background: #eff6ff;
-    }
-
-    .option-btn.selected {
-      border-color: #2563eb;
-      background: #eff6ff;
-      color: #1d4ed8;
-      font-weight: 600;
-    }
-
-    .option-dot {
-      width: 18px;
-      height: 18px;
-      border-radius: 50%;
-      border: 2px solid #d1d5db;
-      flex-shrink: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: border-color 0.15s;
-    }
-
-    .option-btn.selected .option-dot {
-      border-color: #2563eb;
-      background: #2563eb;
-    }
-
-    .option-btn.selected .option-dot::after {
-      content: '';
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #fff;
-    }
-
-    /* NAV BUTTONS */
-    .nav-buttons {
-      display: flex;
-      justify-content: space-between;
-      margin-top: 1.75rem;
-    }
-
-    .btn-back {
-      background: none;
-      border: 2px solid #e5e7eb;
-      border-radius: 8px;
-      padding: 0.65rem 1.3rem;
-      font-size: 0.9rem;
-      color: #6b7280;
-      cursor: pointer;
-      transition: border-color 0.15s;
-    }
-
-    .btn-back:hover { border-color: #9ca3af; }
-
-    .btn-next {
-      background: #2563eb;
-      border: none;
-      border-radius: 8px;
-      padding: 0.65rem 1.6rem;
-      font-size: 0.95rem;
-      font-weight: 600;
-      color: #fff;
-      cursor: pointer;
-      transition: background 0.15s;
-      margin-left: auto;
-    }
-
-    .btn-next:disabled {
-      background: #93c5fd;
-      cursor: not-allowed;
-    }
-
-    .btn-next:not(:disabled):hover { background: #1d4ed8; }
-
-    /* RESULT CARD */
-    .result-card { text-align: center; }
-
-    .result-badge {
-      display: inline-block;
-      background: #dbeafe;
-      color: #1d4ed8;
-      font-size: 0.78rem;
-      font-weight: 700;
-      padding: 0.3rem 0.9rem;
-      border-radius: 999px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      margin-bottom: 1rem;
-    }
-
-    .result-card h2 {
-      font-size: 1.4rem;
-      font-weight: 800;
-      color: #111827;
-      margin-bottom: 0.75rem;
-    }
-
-    .result-card p.summary {
-      font-size: 0.97rem;
-      color: #4b5563;
-      margin-bottom: 1.5rem;
-    }
-
-    .steps-list {
-      text-align: left;
-      list-style: none;
-      display: flex;
-      flex-direction: column;
-      gap: 0.6rem;
-      margin-bottom: 1.75rem;
-    }
-
-    .steps-list li {
-      display: flex;
-      align-items: flex-start;
-      gap: 0.65rem;
-      font-size: 0.92rem;
-      color: #374151;
-    }
-
-    .step-icon {
-      font-size: 1rem;
-      flex-shrink: 0;
-      margin-top: 0.1rem;
-    }
-
-    /* EMAIL CAPTURE */
-    .email-section {
-      background: #f0f9ff;
-      border: 1px solid #bae6fd;
-      border-radius: 10px;
-      padding: 1.25rem;
-      margin-top: 1rem;
-    }
-
-    .email-section p {
-      font-size: 0.88rem;
-      color: #0369a1;
-      margin-bottom: 0.85rem;
-      font-weight: 500;
-    }
-
-    .email-row {
-      display: flex;
-      gap: 0.5rem;
-      flex-wrap: wrap;
-    }
-
-    .email-row input {
-      flex: 1 1 180px;
-      padding: 0.65rem 0.9rem;
-      border: 1.5px solid #bae6fd;
-      border-radius: 8px;
-      font-size: 0.9rem;
-      color: #111827;
-      outline: none;
-    }
-
-    .email-row input:focus { border-color: #2563eb; }
-
-    .email-row button {
-      background: #0369a1;
-      color: #fff;
-      border: none;
-      border-radius: 8px;
-      padding: 0.65rem 1.2rem;
-      font-size: 0.9rem;
-      font-weight: 600;
-      cursor: pointer;
-      white-space: nowrap;
-      transition: background 0.15s;
-    }
-
-    .email-row button:hover { background: #075985; }
-
-    .email-thanks {
-      font-size: 0.88rem;
-      color: #15803d;
-      font-weight: 600;
-      display: none;
-    }
-
-    .restart-btn {
-      display: inline-block;
-      margin-top: 1.5rem;
-      font-size: 0.85rem;
-      color: #6b7280;
-      cursor: pointer;
-      text-decoration: underline;
-      background: none;
-      border: none;
-    }
-
-    /* DISCLAIMER */
-    .disclaimer {
-      font-size: 0.75rem;
-      color: #9ca3af;
-      text-align: center;
-      margin-top: 1.5rem;
-    }
-
-    /* FOOTER */
-    footer {
-      background: #111827;
-      color: #9ca3af;
-      text-align: center;
-      padding: 1.25rem;
-      font-size: 0.78rem;
-      margin-top: 3rem;
-    }
-    footer a { color: #6b7280; text-decoration: none; margin: 0 0.4rem; }
-
-    @media (max-width: 480px) {
-      .card { padding: 1.5rem 1.1rem; }
-      .question-text { font-size: 1.05rem; }
-    }
-  </style>
-</head>
-<body>
-
-<!-- NAV -->
-<nav>
-  <div class="logo">CreditStart</div>
-  <a href="index.html">← Back to home</a>
-</nav>
-
-<!-- QUIZ WRAPPER -->
-<div class="quiz-wrapper">
-
-  <!-- PROGRESS -->
-  <div class="step-counter" id="stepCounter">Question 1 of 8</div>
-  <div class="progress-bar-bg">
-    <div class="progress-bar-fill" id="progressFill" style="width:12.5%"></div>
-  </div>
-
-  <!-- CARD -->
-  <div class="card" id="quizCard">
-    <!-- injected by JS -->
-  </div>
-
-  <p class="disclaimer">
-    For educational purposes only. Not financial advice.
-  </p>
-</div>
-
-<!-- FOOTER -->
-<footer>
-  <p>© 2025 CreditStart &nbsp;|&nbsp;
-    <a href="#">Privacy</a>
-    <a href="#">Terms</a>
-  </p>
-</footer>
-
-<script>
-  /* ── DATA ── */
-  const questions = [
-    {
-      id: "role",
-      text: "What best describes you right now?",
-      options: [
-        "Student",
-        "Employed (full-time or part-time)",
-        "Gig worker / freelancer",
-        "Homemaker / not working outside home",
-        "Recent grad / between jobs"
-      ]
-    },
-    {
-      id: "bankAccount",
-      text: "Do you have a bank account in your own name?",
-      options: ["Yes", "No"]
-    },
-    {
-      id: "ownCard",
-      text: "Do you have a credit card in your own name?",
-      options: ["Yes", "No"]
-    },
-    {
-      id: "authUser",
-      text: "Are you an authorized user on someone else's credit card? (spouse, parent, or family member)",
-      options: ["Yes", "No", "Not sure"]
-    },
-    {
-      id: "knowScore",
-      text: "Do you know your credit score?",
-      options: ["Yes", "No"]
-    },
-    {
-      id: "rejected",
-      text: "Have you ever applied for credit and been rejected?",
-      options: ["Yes", "No", "Never applied"]
-    },
-    {
-      id: "bills",
-      text: "Do you pay any regular bills? (rent, phone, utilities, subscriptions)",
-      options: [
-        "Yes, in my own name",
-        "Yes, but under someone else's name",
-        "No bills in my name"
-      ]
-    },
-    {
-      id: "goal",
-      text: "What is your main goal right now?",
-      options: [
-        "Start building credit from scratch",
-        "Understand why I was rejected",
-        "Build credit independently from my spouse or family",
-        "Improve the little credit I already have"
-      ]
-    }
-  ];
-
-  /* ── RESULT ENGINE ── */
-  function getResult(ans) {
-    if (ans.rejected === "Yes") return "rejected";
-    if (ans.role === "Homemaker / not working outside home" &&
-        ans.ownCard === "No") return "homemaker";
-    if (ans.ownCard === "No" && ans.bankAccount === "No" &&
-        ans.authUser === "No") return "zero";
-    if (ans.ownCard === "No") return "thin";
-    return "builder";
+const results = {
+  zero: {
+    badge: "Starting From Zero",
+    emoji: "🌱",
+    title: "You're starting at the very beginning — that's okay.",
+    summary: "You don't have a credit file yet. That's more common than you think. Here's your clear starting path.",
+    steps: [
+      { icon: "🏦", text: "Open a checking account in your own name — it's your foundation." },
+      { icon: "💳", text: "Apply for one secured credit card — easier to get, builds real history." },
+      { icon: "📅", text: "Set autopay so you never miss a payment." },
+      { icon: "📉", text: "Keep your balance below 30% of the card limit." },
+      { icon: "⏳", text: "Wait 3–6 months, then check your progress." }
+    ],
+    avoid: "Avoid applying for multiple cards at once — each application leaves a mark.",
+    timeline: "First results visible: 3–6 months"
+  },
+  thin: {
+    badge: "Thin File Beginner",
+    emoji: "📄",
+    title: "You have a small start — now build on it.",
+    summary: "You have a little history but not much yet. Consistent simple habits over the next few months will move the needle.",
+    steps: [
+      { icon: "✅", text: "Pay every account on time — this is the single most important factor." },
+      { icon: "📉", text: "Keep credit usage below 30% on all cards." },
+      { icon: "🚫", text: "Don't open multiple new accounts at once." },
+      { icon: "🔍", text: "Check your credit report for errors — free at annualcreditreport.com." },
+      { icon: "⏳", text: "6 months of consistent habits before applying for anything new." }
+    ],
+    avoid: "Avoid closing old accounts — length of credit history matters.",
+    timeline: "Noticeable improvement: 4–8 months"
+  },
+  rejected: {
+    badge: "Rejected / Unsure",
+    emoji: "🔄",
+    title: "A rejection is information — here's what to do next.",
+    summary: "Being rejected stings, but it's fixable. Stop random applications and take a targeted approach.",
+    steps: [
+      { icon: "🛑", text: "Stop applying for new cards right now — each hard pull hurts your score." },
+      { icon: "📋", text: "Get your free credit report and look for errors or negative marks." },
+      { icon: "🔒", text: "Apply for a secured card — approval is much easier and it builds real history." },
+      { icon: "📅", text: "Make on-time payments for 3–6 months before applying again." },
+      { icon: "📞", text: "Ask your bank about a credit-builder loan if a card isn't an option." }
+    ],
+    avoid: "Avoid 'credit repair' services that charge fees — most are unnecessary.",
+    timeline: "Ready to reapply: 3–6 months"
+  },
+  homemaker: {
+    badge: "Homemaker / Dependent Income",
+    emoji: "🛡️",
+    title: "Building your own credit matters more than you think.",
+    summary: "Having credit only through a spouse or family member leaves you financially vulnerable. Here's how to build independently.",
+    steps: [
+      { icon: "👤", text: "Open a bank account in your own name if you haven't yet." },
+      { icon: "💳", text: "Apply for a secured credit card in your own name — you can qualify even without your own income." },
+      { icon: "🤝", text: "Being an authorized user on a spouse's card helps — but your own card matters too." },
+      { icon: "📅", text: "Pay your card on time every month, even if it's a small purchase." },
+      { icon: "🔍", text: "Check your own credit report — you may have more history than you think." }
+    ],
+    avoid: "Avoid depending entirely on a joint account — it doesn't always build your individual credit.",
+    timeline: "Independent credit profile visible: 3–6 months"
+  },
+  builder: {
+    badge: "Early Builder",
+    emoji: "📈",
+    title: "You have a start — now build it the right way.",
+    summary: "You already have some credit history. The goal now is to keep it clean and grow it steadily.",
+    steps: [
+      { icon: "✅", text: "Never miss a payment — perfect payment history is your biggest asset." },
+      { icon: "📉", text: "Keep utilization below 30% on all cards." },
+      { icon: "🚫", text: "Avoid unnecessary hard inquiries — only apply when you really need to." },
+      { icon: "📋", text: "Check your credit report once a year for errors." },
+      { icon: "⏳", text: "Let accounts age — older credit history helps your score." }
+    ],
+    avoid: "Avoid closing your oldest card even if you rarely use it.",
+    timeline: "Continued steady improvement over 6–12 months"
   }
+};
 
-  const results = {
-    zero: {
-      badge: "Starting From Zero",
-      title: "You're starting at the very beginning — that's okay.",
-      summary: "You don't have a credit file yet, and that's more common than you think. Here's a clear starting path.",
-      steps: [
-        { icon: "🏦", text: "Open a checking account first — it's your foundation." },
-        { icon: "💳", text: "Apply for one beginner-safe product: a secured credit card." },
-        { icon: "📅", text: "Set up autopay so you never miss a payment." },
-        { icon: "📉", text: "Keep your balance below 30% of the card limit." },
-        { icon: "⏳", text: "Wait 3–6 months, then check your progress." }
-      ]
-    },
-    thin: {
-      badge: "Thin File Beginner",
-      title: "You have a small start — now build on it.",
-      summary: "You have a little history but not much yet. The key is consistent, simple habits over the next few months.",
-      steps: [
-        { icon: "✅", text: "Pay every account on time — this matters most." },
-        { icon: "📉", text: "Keep credit usage low (below 30%)." },
-        { icon: "🚫", text: "Don't open multiple new accounts at once." },
-        { icon: "🔍", text: "Check your credit report for any errors." },
-        { icon: "⏳", text: "Give it 6 months of consistent habits before applying for anything new." }
-      ]
-    },
-    rejected: {
-      badge: "Rejected / Unsure",
-      title: "A rejection is information — here's what to do next.",
-      summary: "Being rejected stings, but it's fixable. The key is to stop random applications and take a targeted approach.",
-      steps: [
-        { icon: "🛑", text: "Stop applying for new cards right now — each hard pull hurts your score." },
-        { icon: "📋", text: "Get your free credit report and look for errors or negative marks." },
-        { icon: "🔒", text: "Consider a secured card — approval is much easier and it builds history." },
-        { icon: "📅", text: "Make on-time payments for 3–6 months before applying again." },
-        { icon: "📞", text: "Ask your bank about a credit-builder loan if a card isn't an option." }
-      ]
-    },
-    homemaker: {
-      badge: "Homemaker / Dependent Income",
-      title: "Building your own credit is more important than you think.",
-      summary: "Having credit only through a spouse or family member leaves you financially vulnerable. Here's how to build independently.",
-      steps: [
-        { icon: "👤", text: "Open a bank account in your own name if you haven't yet." },
-        { icon: "💳", text: "Apply for a secured credit card in your own name — you can qualify even without income." },
-        { icon: "🤝", text: "If you're an authorized user on a spouse's card, that helps — but your own card matters too." },
-        { icon: "📅", text: "Pay your card on time every month, even if it's a small amount." },
-        { icon: "🛡️", text: "Independent credit protects you — regardless of what changes in life." }
-      ]
-    },
-    builder: {
-      badge: "Early Builder",
-      title: "You have a start — now build it the right way.",
-      summary: "You already have some credit history. The goal now is to keep it clean and grow it steadily.",
-      steps: [
-        { icon: "✅", text: "Never miss a payment — perfect payment history is your biggest asset." },
-        { icon: "📉", text: "Keep your utilization below 30% on all cards." },
-        { icon: "🚫", text: "Avoid unnecessary hard inquiries — only apply when you really need to." },
-        { icon: "📋", text: "Check your credit report once a year for errors." },
-        { icon: "⏳", text: "Let your accounts age — older credit history helps your score." }
-      ]
-    }
-  };
 
-  /* ── STATE ── */
-  let current = 0;
-  const answers = {};
+function renderResult() {
+  const key = getResult(answers);
+  const r = results[key];
 
-  /* ── RENDER QUESTION ── */
-  function renderQuestion() {
-    const q = questions[current];
-    const totalQ = questions.length;
-    const pct = ((current + 1) / totalQ * 100).toFixed(0);
+  document.getElementById("stepCounter").textContent = "Your personalized plan";
+  document.getElementById("progressFill").style.width = "100%";
 
-    document.getElementById("stepCounter").textContent =
-      `Question ${current + 1} of ${totalQ}`;
-    document.getElementById("progressFill").style.width = pct + "%";
+  document.getElementById("quizCard").innerHTML = `
+    <div class="result-card">
 
-    const selected = answers[q.id] || null;
+      <div class="result-emoji">${r.emoji}</div>
+      <div class="result-badge">${r.badge}</div>
+      <h2>${r.title}</h2>
+      <p class="summary">${r.summary}</p>
 
-    document.getElementById("quizCard").innerHTML = `
-      <p class="question-text">${q.text}</p>
-      <div class="options">
-        ${q.options.map(opt => `
-          <button class="option-btn ${selected === opt ? 'selected' : ''}"
-                  onclick="selectOption('${q.id}', this, '${escQ(opt)}')">
-            <span class="option-dot"></span>
-            ${opt}
-          </button>
+      <ul class="steps-list">
+        ${r.steps.map(s => `
+          <li>
+            <span class="step-icon">${s.icon}</span>
+            <span>${s.text}</span>
+          </li>
         `).join("")}
+      </ul>
+
+      <div class="avoid-box">
+        <span class="avoid-label">⚠️ Watch out:</span>
+        ${r.avoid}
       </div>
-      <div class="nav-buttons">
-        ${current > 0
-          ? `<button class="btn-back" onclick="goBack()">← Back</button>`
-          : `<span></span>`}
-        <button class="btn-next" id="nextBtn"
-                ${selected ? "" : "disabled"}
-                onclick="goNext()">
-          ${current < totalQ - 1 ? "Next →" : "Get my plan →"}
-        </button>
+
+      <div class="timeline-box">
+        <span class="timeline-label">🗓️ Timeline:</span>
+        ${r.timeline}
       </div>
-    `;
-  }
 
-  function escQ(s) {
-    return s.replace(/'/g, "\\'");
-  }
-
-  function selectOption(qId, btn, value) {
-    answers[qId] = value;
-    document.querySelectorAll(".option-btn").forEach(b => b.classList.remove("selected"));
-    btn.classList.add("selected");
-    document.getElementById("nextBtn").disabled = false;
-  }
-
-  function goNext() {
-    if (!answers[questions[current].id]) return;
-    current++;
-    if (current >= questions.length) {
-      renderResult();
-    } else {
-      renderQuestion();
-    }
-  }
-
-  function goBack() {
-    if (current > 0) { current--; renderQuestion(); }
-  }
-
-  /* ── RENDER RESULT ── */
-  function renderResult() {
-    const key = getResult(answers);
-    const r = results[key];
-
-    document.getElementById("stepCounter").textContent = "Your personalized plan";
-    document.getElementById("progressFill").style.width = "100%";
-
-    document.getElementById("quizCard").innerHTML = `
-      <div class="result-card">
-        <div class="result-badge">${r.badge}</div>
-        <h2>${r.title}</h2>
-        <p class="summary">${r.summary}</p>
-        <ul class="steps-list">
-          ${r.steps.map(s => `
-            <li>
-              <span class="step-icon">${s.icon}</span>
-              <span>${s.text}</span>
-            </li>
-          `).join("")}
-        </ul>
-
-        <div class="email-section">
-          <p>📬 Get your monthly credit tip — free, no spam, unsubscribe anytime.</p>
-          <div class="email-row">
-            <input type="email" id="emailInput" placeholder="you@email.com" />
-            <button onclick="submitEmail()">Send me tips</button>
-          </div>
-          <p class="email-thanks" id="emailThanks">
-            ✅ Got it! We'll send your first tip soon.
-          </p>
+      <div class="email-section">
+        <p>📬 Get a monthly credit tip — free, no spam, unsubscribe anytime.</p>
+        <div class="email-row">
+          <input type="email" id="emailInput" placeholder="you@email.com" />
+          <button onclick="submitEmail()">Send me tips</button>
         </div>
-
-        <button class="restart-btn" onclick="restart()">
-          ↩ Start over
-        </button>
+        <p class="email-thanks" id="emailThanks">
+          ✅ Got it! We'll send your first tip soon.
+        </p>
       </div>
-    `;
-  }
 
-  function submitEmail() {
-    const val = document.getElementById("emailInput").value.trim();
-    if (!val || !val.includes("@")) {
-      alert("Please enter a valid email address.");
-      return;
-    }
-    /* TODO: send to backend / Mailchimp / Resend */
-    document.querySelector(".email-row").style.display = "none";
-    document.getElementById("emailThanks").style.display = "block";
-  }
+      <button class="restart-btn" onclick="restart()">↩ Start over</button>
 
-  function restart() {
-    current = 0;
-    Object.keys(answers).forEach(k => delete answers[k]);
-    document.getElementById("stepCounter").textContent = "Question 1 of 8";
-    renderQuestion();
-  }
+    </div>
+  `;
+}
 
-  /* ── INIT ── */
-  renderQuestion();
-</script>
-</body>
-</html>
+
+
+/* RESULT POLISH */
+.result-emoji {
+  font-size: 2.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.avoid-box {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 10px;
+  padding: 0.85rem 1.1rem;
+  font-size: 0.88rem;
+  color: #92400e;
+  text-align: left;
+  margin-bottom: 0.75rem;
+}
+
+.avoid-label {
+  font-weight: 700;
+  margin-right: 0.35rem;
+}
+
+.timeline-box {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 10px;
+  padding: 0.85rem 1.1rem;
+  font-size: 0.88rem;
+  color: #166534;
+  text-align: left;
+  margin-bottom: 1.5rem;
+}
+
+.timeline-label {
+  font-weight: 700;
+  margin-right: 0.35rem;
+}
