@@ -1,0 +1,244 @@
+# LEVEL-0 PLAN — Local Developer Hub / Internal Platform
+
+## Goal
+
+Create a LAN-only internal platform on the `192.168.1.x` network that provides:
+
+- one central access point for local services
+- human-friendly local domain names
+- local HTTPS support
+- a dashboard for visibility/access
+- a local Git service like GitHub/Gitea
+- a clean foundation for future app hosting and deployment
+
+This phase is **LAN only**.
+No Internet exposure is required.
+No cloud integration is required.
+No public DNS or public TLS is required.
+
+---
+
+## Guiding Principles
+
+- Keep changes incremental
+- Do not break current working services
+- Standardize access before re-architecting apps
+- Prefer one front door over many IP:port combinations
+- Use internal DNS + reverse proxy + local HTTPS
+- Add future services into the same pattern
+
+---
+
+## Scope for Level 0
+
+This level focuses on:
+
+1. choosing a main server / entry point
+2. defining local naming conventions
+3. setting up internal DNS
+4. setting up a reverse proxy
+5. setting up local HTTPS
+6. creating a dashboard
+7. setting up a local Git web service
+8. registering existing services under the new internal naming system
+
+This level does **not** yet focus on:
+
+- public Internet access
+- automatic deployment pipelines
+- CI/CD
+- multi-user production hosting
+- advanced auth/SSO
+- container orchestration redesign
+- moving all apps into Docker
+- wildcard public certificates
+
+---
+
+## Target End State for Level 0
+
+At the end of this level, the environment should look conceptually like this:
+
+- `https://hub.<local-domain>` → dashboard / service catalog
+- `https://git.<local-domain>` → local Git server
+- `https://jellyfin.<local-domain>` → Jellyfin
+- `https://pgadmin.<local-domain>` → DB admin (optional)
+- `https://app1.<local-domain>` → existing app
+- `https://app2.<local-domain>` → existing app
+
+Users should no longer need to remember raw IPs and random ports for normal access.
+
+---
+
+## High-Level Phases
+
+### Phase 1 — Foundation Decisions
+Decide the basic structure of the platform:
+
+- choose the main host machine
+- choose the local domain naming scheme
+- choose whether to keep existing services where they are
+- decide which service becomes the central entry point
+
+Deliverable:
+- a documented naming and host plan
+
+---
+
+### Phase 2 — Internal Naming / DNS
+Create local DNS resolution so friendly names work across the LAN.
+
+Goals:
+- local domain resolves on all client devices
+- selected service names map to the correct internal hosts
+- LAN devices use the intended DNS source consistently
+
+Deliverable:
+- internal names resolve correctly on the LAN
+
+---
+
+### Phase 3 — Reverse Proxy / Gateway
+Set up one internal gateway that receives requests for local service names and routes them to the correct backend services.
+
+Goals:
+- one access layer in front of services
+- no need to remember ports
+- can proxy to services on same or different LAN hosts
+
+Deliverable:
+- selected services accessible by internal domain names
+
+---
+
+### Phase 4 — Local HTTPS
+Enable HTTPS for internal services using a local trust model.
+
+Goals:
+- remove plain HTTP where practical
+- make internal URLs accessible via HTTPS
+- establish a local certificate strategy for trusted browser access
+
+Deliverable:
+- internal HTTPS works for selected service names
+
+---
+
+### Phase 5 — Dashboard / Service Hub
+Deploy a dashboard that becomes the main landing page for your environment.
+
+Goals:
+- list all important services
+- provide friendly links
+- improve discoverability
+- reduce dependence on custom helper scripts
+
+Deliverable:
+- a central dashboard reachable by local domain
+
+---
+
+### Phase 6 — Local Git Service
+Convert the current file-based Git storage into a proper Git web service.
+
+Goals:
+- browser-based repo management
+- create/store/browse repositories
+- replace ad hoc file-based Git access with a structured Git platform
+- prepare for future source-control-centered workflows
+
+Deliverable:
+- local Git service reachable by local domain
+
+---
+
+### Phase 7 — Service Registration and Cleanup
+Bring current services into the platform gradually.
+
+Goals:
+- map each existing service to a friendly internal URL
+- document service location, purpose, and backend host
+- reduce confusion about where each service runs
+- preserve existing working services while improving access
+
+Deliverable:
+- a maintained internal service catalog
+
+---
+
+### Phase 8 — Future-Ready Structure
+Prepare for later expansion without implementing it yet.
+
+Possible future areas:
+- app deployment workflow
+- local CI/CD
+- container-first deployment model
+- backups and restore strategy
+- monitoring/logging
+- optional outside access
+- optional public deployment path
+
+Deliverable:
+- Level 0 completed on a structure that can grow later
+
+---
+
+## Suggested Naming Pattern
+
+Use one private local domain consistently.
+
+Examples of service names:
+- `hub.<local-domain>`
+- `git.<local-domain>`
+- `jellyfin.<local-domain>`
+- `status.<local-domain>`
+- `pgadmin.<local-domain>`
+- `app-node.<local-domain>`
+- `app-python.<local-domain>`
+- `pwa-demo.<local-domain>`
+
+Naming should be:
+- short
+- memorable
+- stable
+- based on service purpose, not random ports
+
+---
+
+## Service Organization Model
+
+Each service should eventually have:
+
+- a friendly name
+- a local URL
+- a backend host/IP
+- a backend port
+- a service type
+- optional notes (DB used, repo used, runtime used)
+
+This creates a simple internal registry of what exists and where.
+
+---
+
+## Constraints
+
+- LAN only
+- minimal disruption to current working apps
+- no public exposure
+- no code implementation yet
+- changes should be testable one layer at a time
+
+---
+
+## Working Method
+
+For each step:
+
+1. pick one phase/subtask
+2. discuss only that step
+3. get a small implementation plan
+4. implement offline
+5. come back and verify
+6. move to the next step only after confirmation
+
+This project must proceed sequentially, not all at once.
