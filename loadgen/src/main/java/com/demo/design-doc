@@ -241,4 +241,14 @@ For each step:
 5. come back and verify
 6. move to the next step only after confirmation
 
-This project must proceed sequentially, not all at once.
+Phase 2 design summary
+You can save this as your DNS decision note:
+DNS software: Technitium DNS Server
+Runs on: 192.168.1.101
+Local domain: home.arpa
+Pilot strategy: test with one client device first
+Initial records planned:
+hub.home.arpa
+git.home.arpa
+jellyfin.home.arpa
+
