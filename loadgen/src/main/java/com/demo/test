@@ -1,38 +1,139 @@
-useEffect(() => {
-  const fallbackToIP = async () => {
-    try {
-      const res = await fetch('https://ipapi.co/json/');
-      const data = await res.json();
-      setJurisdiction(data.region || 'Unknown');
-    } catch {
-      setJurisdiction('Unknown');
-    }
+import { NextRequest, NextResponse } from 'next/server';
+
+export async function POST(request: NextRequest) {
+  const body = await request.json();
+  const { licenseNumber, jurisdiction } = body;
+
+  if (!licenseNumber) {
+    return NextResponse.json(
+      { error: 'License number is required' },
+      { status: 400 }
+    );
+  }
+
+  const simulated = getSimulatedResult(licenseNumber, jurisdiction);
+
+  return NextResponse.json(simulated);
+}
+
+function getSimulatedResult(licenseNumber: string, jurisdiction: string) {
+  const records: Record<string, {
+    name: string;
+    sourceStatus: string;
+    sourceJurisdiction: string;
+    expiration: string;
+    source: string;
+  }> = {
+    'ABC-12345': {
+      name: 'Smith Roofing LLC',
+      sourceStatus: 'Active',
+      sourceJurisdiction: 'Florida',
+      expiration: '2026-03-15',
+      source: 'State Contractor Board (simulated)',
+    },
+    'XYZ-99999': {
+      name: 'QuickFix Services',
+      sourceStatus: 'Expired',
+      sourceJurisdiction: 'Florida',
+      expiration: '2023-11-01',
+      source: 'State Contractor Board (simulated)',
+    },
+    'LIC-55555': {
+      name: 'Reliable AC Pros',
+      sourceStatus: 'Active',
+      sourceJurisdiction: 'Texas',
+      expiration: '2027-12-31',
+      source: 'State Contractor Board (simulated)',
+    },
+    'SUS-77777': {
+      name: 'Shady Repairs Inc',
+      sourceStatus: 'Suspended',
+      sourceJurisdiction: 'California',
+      expiration: '2028-06-01',
+      source: 'State Contractor Board (simulated)',
+    },
   };
 
-  if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        try {
-          const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?lat=${position.coords.latitude}&lon=${position.coords.longitude}&format=json`
-          );
-          const data = await res.json();
-          const state = data.address?.state || '';
-          if (state) {
-            setJurisdiction(state);
-          } else {
-            await fallbackToIP();
-          }
-        } catch {
-          await fallbackToIP();
-        }
-      },
-      async () => {
-        await fallbackToIP();
-      },
-      { timeout: 5000 }
-    );
-  } else {
-    fallbackToIP();
+  const record = records[licenseNumber.toUpperCase()];
+
+  if (!record) {
+    return {
+      status: 'No Match',
+      sourceStatus: '—',
+      name: '—',
+      licenseNumber,
+      jurisdiction,
+      sourceJurisdiction: '—',
+      jurisdictionMatch: false,
+      expiration: '—',
+      source: 'State Contractor Board (simulated)',
+    };
   }
-}, []);
+
+  const today = new Date();
+  const expDate = new Date(record.expiration);
+  const isExpired = expDate < today;
+
+  const negativeStatuses = ['Suspended', 'Revoked', 'Expired', 'Inactive'];
+  const isNegativeStatus = negativeStatuses.includes(record.sourceStatus);
+
+  const userJurisdiction = jurisdiction.trim().toLowerCase();
+  const sourceJurisdiction = record.sourceJurisdiction.trim().toLowerCase();
+  const jurisdictionMatch = userJurisdiction === sourceJurisdiction;
+
+  let finalStatus: string;
+
+  if (isNegativeStatus) {
+    finalStatus = 'Not Active';
+  } else if (isExpired) {
+    finalStatus = 'Not Active';
+  } else if (!jurisdictionMatch) {
+    finalStatus = 'Not Active';
+  } else {
+    finalStatus = 'Active';
+  }
+
+  return {
+    status: finalStatus,
+    sourceStatus: record.sourceStatus,
+    name: record.name,
+    licenseNumber: licenseNumber.toUpperCase(),
+    jurisdiction,
+    sourceJurisdiction: record.sourceJurisdiction,
+    jurisdictionMatch,
+    expiration: record.expiration,
+    source: record.source,
+  };
+}
+
+
+
+
+/////
+const [result, setResult] = useState<null | {
+  status: string;
+  sourceStatus: string;
+  name: string;
+  licenseNumber: string;
+  jurisdiction: string;
+  sourceJurisdiction: string;
+  jurisdictionMatch: boolean;
+  expiration: string;
+  source: string;
+}>(null);
+
+
+<div className="text-sm space-y-1">
+  <p><span className="font-medium">License:</span> {result.licenseNumber}</p>
+  <p><span className="font-medium">Name:</span> {result.name}</p>
+  <p><span className="font-medium">Your Location:</span> {result.jurisdiction}</p>
+  <p><span className="font-medium">License Jurisdiction:</span> {result.sourceJurisdiction}</p>
+  {!result.jurisdictionMatch && result.status !== 'No Match' && (
+    <p className="font-semibold text-red-700 mt-2">
+      ⚠ This license was not issued in your current jurisdiction.
+    </p>
+  )}
+  <p><span className="font-medium">Agency Status:</span> {result.sourceStatus}</p>
+  <p><span className="font-medium">Expiration:</span> {result.expiration}</p>
+  <p><span className="font-medium">Source:</span> {result.source}</p>
+</div>
