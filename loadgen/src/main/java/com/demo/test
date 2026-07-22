@@ -1,49 +1,38 @@
-import type { Metadata, Viewport } from 'next';
-import './globals.css';
+useEffect(() => {
+  const fallbackToIP = async () => {
+    try {
+      const res = await fetch('https://ipapi.co/json/');
+      const data = await res.json();
+      setJurisdiction(data.region || 'Unknown');
+    } catch {
+      setJurisdiction('Unknown');
+    }
+  };
 
-export const metadata: Metadata = {
-  title: 'Contractor License Verifier',
-  description: 'Verify a contractor license in under 60 seconds',
-  manifest: '/manifest.json',
-  appleWebApp: {
-    capable: true,
-    statusBarStyle: 'default',
-    title: 'LicenseCheck',
-  },
-};
-
-export const viewport: Viewport = {
-  themeColor: '#2563eb',
-  width: 'device-width',
-  initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
-};
-
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
-  return (
-    <html lang="en">
-      <head>
-        <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-      </head>
-      <body>
-        {children}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              if ('serviceWorker' in navigator) {
-                window.addEventListener('load', () => {
-                  navigator.serviceWorker.register('/sw.js');
-                });
-              }
-            `,
-          }}
-        />
-      </body>
-    </html>
-  );
-}
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${position.coords.latitude}&lon=${position.coords.longitude}&format=json`
+          );
+          const data = await res.json();
+          const state = data.address?.state || '';
+          if (state) {
+            setJurisdiction(state);
+          } else {
+            await fallbackToIP();
+          }
+        } catch {
+          await fallbackToIP();
+        }
+      },
+      async () => {
+        await fallbackToIP();
+      },
+      { timeout: 5000 }
+    );
+  } else {
+    fallbackToIP();
+  }
+}, []);
