@@ -1,139 +1,219 @@
-import { NextRequest, NextResponse } from 'next/server';
+'use client';
 
-export async function POST(request: NextRequest) {
-  const body = await request.json();
-  const { licenseNumber, jurisdiction } = body;
+import { useState, useEffect } from 'react';
 
-  if (!licenseNumber) {
-    return NextResponse.json(
-      { error: 'License number is required' },
-      { status: 400 }
-    );
-  }
-
-  const simulated = getSimulatedResult(licenseNumber, jurisdiction);
-
-  return NextResponse.json(simulated);
-}
-
-function getSimulatedResult(licenseNumber: string, jurisdiction: string) {
-  const records: Record<string, {
-    name: string;
+export default function Home() {
+  const [licenseNumber, setLicenseNumber] = useState('');
+  const [jurisdiction, setJurisdiction] = useState('Detecting...');
+  const [result, setResult] = useState<null | {
+    status: string;
     sourceStatus: string;
+    name: string;
+    licenseNumber: string;
+    jurisdiction: string;
     sourceJurisdiction: string;
+    jurisdictionMatch: boolean;
     expiration: string;
     source: string;
-  }> = {
-    'ABC-12345': {
-      name: 'Smith Roofing LLC',
-      sourceStatus: 'Active',
-      sourceJurisdiction: 'Florida',
-      expiration: '2026-03-15',
-      source: 'State Contractor Board (simulated)',
-    },
-    'XYZ-99999': {
-      name: 'QuickFix Services',
-      sourceStatus: 'Expired',
-      sourceJurisdiction: 'Florida',
-      expiration: '2023-11-01',
-      source: 'State Contractor Board (simulated)',
-    },
-    'LIC-55555': {
-      name: 'Reliable AC Pros',
-      sourceStatus: 'Active',
-      sourceJurisdiction: 'Texas',
-      expiration: '2027-12-31',
-      source: 'State Contractor Board (simulated)',
-    },
-    'SUS-77777': {
-      name: 'Shady Repairs Inc',
-      sourceStatus: 'Suspended',
-      sourceJurisdiction: 'California',
-      expiration: '2028-06-01',
-      source: 'State Contractor Board (simulated)',
-    },
-  };
+  }>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  const record = records[licenseNumber.toUpperCase()];
-
-  if (!record) {
-    return {
-      status: 'No Match',
-      sourceStatus: '—',
-      name: '—',
-      licenseNumber,
-      jurisdiction,
-      sourceJurisdiction: '—',
-      jurisdictionMatch: false,
-      expiration: '—',
-      source: 'State Contractor Board (simulated)',
+  useEffect(() => {
+    const fallbackToIP = async () => {
+      try {
+        const res = await fetch('https://ipapi.co/json/');
+        const data = await res.json();
+        setJurisdiction(data.region || 'Unknown');
+      } catch {
+        setJurisdiction('Unknown');
+      }
     };
-  }
 
-  const today = new Date();
-  const expDate = new Date(record.expiration);
-  const isExpired = expDate < today;
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          try {
+            const res = await fetch(
+              `https://nominatim.openstreetmap.org/reverse?lat=${position.coords.latitude}&lon=${position.coords.longitude}&format=json`
+            );
+            const data = await res.json();
+            const state = data.address?.state || '';
+            if (state) {
+              setJurisdiction(state);
+            } else {
+              await fallbackToIP();
+            }
+          } catch {
+            await fallbackToIP();
+          }
+        },
+        async () => {
+          await fallbackToIP();
+        },
+        { timeout: 5000 }
+      );
+    } else {
+      fallbackToIP();
+    }
+  }, []);
 
-  const negativeStatuses = ['Suspended', 'Revoked', 'Expired', 'Inactive'];
-  const isNegativeStatus = negativeStatuses.includes(record.sourceStatus);
+  const handleVerify = async () => {
+    if (!licenseNumber.trim()) {
+      setError('Please enter a license number.');
+      return;
+    }
 
-  const userJurisdiction = jurisdiction.trim().toLowerCase();
-  const sourceJurisdiction = record.sourceJurisdiction.trim().toLowerCase();
-  const jurisdictionMatch = userJurisdiction === sourceJurisdiction;
+    setError('');
+    setLoading(true);
+    setResult(null);
 
-  let finalStatus: string;
+    try {
+      const res = await fetch('/api/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          licenseNumber: licenseNumber.trim(),
+          jurisdiction,
+        }),
+      });
 
-  if (isNegativeStatus) {
-    finalStatus = 'Not Active';
-  } else if (isExpired) {
-    finalStatus = 'Not Active';
-  } else if (!jurisdictionMatch) {
-    finalStatus = 'Not Active';
-  } else {
-    finalStatus = 'Active';
-  }
-
-  return {
-    status: finalStatus,
-    sourceStatus: record.sourceStatus,
-    name: record.name,
-    licenseNumber: licenseNumber.toUpperCase(),
-    jurisdiction,
-    sourceJurisdiction: record.sourceJurisdiction,
-    jurisdictionMatch,
-    expiration: record.expiration,
-    source: record.source,
+      const data = await res.json();
+      setResult(data);
+    } catch {
+      setError('Verification failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const statusColor = (status: string) => {
+    if (status === 'Active') return 'bg-green-100 border-green-500 text-green-800';
+    if (status === 'Not Active') return 'bg-yellow-100 border-yellow-500 text-yellow-800';
+    return 'bg-red-100 border-red-500 text-red-800';
+  };
+
+  const showTips = result && result.status !== 'No Match';
+
+  return (
+    <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-gray-50">
+      <div className="w-full max-w-md">
+        <h1 className="text-2xl font-bold text-center mb-2">
+          Verify a Contractor License
+        </h1>
+        <p className="text-sm text-gray-500 text-center mb-6">
+          Enter the license number to check if it matches an official record.
+        </p>
+
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Jurisdiction
+        </label>
+        <input
+          type="text"
+          value={jurisdiction}
+          onChange={(e) => setJurisdiction(e.target.value)}
+          className="w-full border border-gray-300 rounded-lg px-4 py-3 mb-4 text-gray-800"
+        />
+
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          License Number
+        </label>
+        <input
+          type="text"
+          value={licenseNumber}
+          onChange={(e) => setLicenseNumber(e.target.value)}
+          placeholder="Enter license number"
+          className="w-full border border-gray-300 rounded-lg px-4 py-3 mb-4 text-gray-800"
+        />
+
+        {error && (
+          <p className="text-red-600 text-sm mb-4">{error}</p>
+        )}
+
+        <button
+          onClick={handleVerify}
+          disabled={loading}
+          className="w-full bg-blue-600 text-white font-semibold rounded-lg px-4 py-3 hover:bg-blue-700 disabled:bg-blue-300"
+        >
+          {loading ? 'Verifying...' : 'Verify'}
+        </button>
+
+        {result && (
+          <div className={`mt-6 border-2 rounded-lg p-4 ${statusColor(result.status)}`}>
+            <p className="text-lg font-bold mb-2">
+              {result.status === 'Active' && 'License Found — Active'}
+              {result.status === 'Not Active' && 'License Found — Not Active'}
+              {result.status === 'No Match' && 'No Matching Record Found'}
+            </p>
+            <div className="text-sm space-y-1">
+              <p><span className="font-medium">License:</span> {result.licenseNumber}</p>
+              <p><span className="font-medium">Name:</span> {result.name}</p>
+              <p><span className="font-medium">Your Location:</span> {result.jurisdiction}</p>
+              <p><span className="font-medium">License Jurisdiction:</span> {result.sourceJurisdiction}</p>
+              {!result.jurisdictionMatch && result.status !== 'No Match' && (
+                <p className="font-semibold text-red-700 mt-2">
+                  ⚠ This license was not issued in your current jurisdiction.
+                </p>
+              )}
+              <p><span className="font-medium">Agency Status:</span> {result.sourceStatus}</p>
+              <p><span className="font-medium">Expiration:</span> {result.expiration}</p>
+              <p><span className="font-medium">Source:</span> {result.source}</p>
+            </div>
+          </div>
+        )}
+
+        {showTips && (
+          <div className="mt-4 border border-gray-300 rounded-lg p-4 bg-white">
+            <p className="text-sm font-semibold text-gray-800 mb-2">Verification Tips</p>
+            <ul className="text-sm text-gray-600 space-y-2 list-disc list-inside">
+              <li>Compare the name on this record to the contractor&apos;s business card, vehicle, or ID.</li>
+              <li>Ask the contractor for a photo ID matching the license holder name.</li>
+              <li>Request a written estimate that includes the business name and license number.</li>
+              <li>Do not pay in full upfront — standard practice is a partial deposit only.</li>
+            </ul>
+          </div>
+        )}
+
+        {result && (
+          <button
+            onClick={() => { setResult(null); setLicenseNumber(''); }}
+            className="w-full mt-4 border border-gray-300 rounded-lg px-4 py-3 text-gray-700 hover:bg-gray-100"
+          >
+            Check Another License
+          </button>
+        )}
+
+        <p className="text-xs text-gray-400 text-center mt-6">
+          Verification helps confirm whether a license record exists and is active. Always use your own judgment before hiring.
+        </p>
+      </div>
+    </main>
+  );
 }
 
 
+////
+{result && result.status === 'Active' && (
+  <div className="mt-4 border border-green-300 rounded-lg p-4 bg-green-50">
+    <p className="text-sm font-semibold text-green-800 mb-2">Verification Tips</p>
+    <ul className="text-sm text-green-700 space-y-2 list-disc list-inside">
+      <li>Compare the name on this record to the contractor&apos;s business card, vehicle, or ID.</li>
+      <li>Ask the contractor for a photo ID matching the license holder name.</li>
+      <li>Request a written estimate that includes the business name and license number.</li>
+      <li>Do not pay in full upfront — standard practice is a partial deposit only.</li>
+    </ul>
+  </div>
+)}
 
+{result && result.status === 'Not Active' && (
+  <div className="mt-4 border border-yellow-300 rounded-lg p-4 bg-yellow-50">
+    <p className="text-sm font-semibold text-yellow-800 mb-2">Caution</p>
+    <ul className="text-sm text-yellow-700 space-y-2 list-disc list-inside">
+      <li>This license is not currently active. Proceed with caution.</li>
+      <li>Ask the contractor why the license is not active and request proof of renewal.</li>
+      <li>Consider contacting the issuing authority to confirm the current status.</li>
+      <li>Do not agree to any work until the license status is resolved.</li>
+    </ul>
+  </div>
+)}
 
-/////
-const [result, setResult] = useState<null | {
-  status: string;
-  sourceStatus: string;
-  name: string;
-  licenseNumber: string;
-  jurisdiction: string;
-  sourceJurisdiction: string;
-  jurisdictionMatch: boolean;
-  expiration: string;
-  source: string;
-}>(null);
-
-
-<div className="text-sm space-y-1">
-  <p><span className="font-medium">License:</span> {result.licenseNumber}</p>
-  <p><span className="font-medium">Name:</span> {result.name}</p>
-  <p><span className="font-medium">Your Location:</span> {result.jurisdiction}</p>
-  <p><span className="font-medium">License Jurisdiction:</span> {result.sourceJurisdiction}</p>
-  {!result.jurisdictionMatch && result.status !== 'No Match' && (
-    <p className="font-semibold text-red-700 mt-2">
-      ⚠ This license was not issued in your current jurisdiction.
-    </p>
-  )}
-  <p><span className="font-medium">Agency Status:</span> {result.sourceStatus}</p>
-  <p><span className="font-medium">Expiration:</span> {result.expiration}</p>
-  <p><span className="font-medium">Source:</span> {result.source}</p>
-</div>
