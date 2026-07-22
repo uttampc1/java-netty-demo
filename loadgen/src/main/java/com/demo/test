@@ -1,224 +1,102 @@
-'use client';
+const CACHE_NAME = 'license-verifier-v1';
 
-import { useState, useEffect } from 'react';
+const PRECACHE_URLS = [
+  '/',
+];
 
-export default function Home() {
-  const [licenseNumber, setLicenseNumber] = useState('');
-  const [jurisdiction, setJurisdiction] = useState('Detecting...');
-  const [result, setResult] = useState<null | {
-    status: string;
-    name: string;
-    licenseNumber: string;
-    jurisdiction: string;
-    expiration: string;
-    source: string;
-  }>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  // Auto-detect jurisdiction on load
-  useEffect(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          try {
-            const res = await fetch(
-              `https://nominatim.openstreetmap.org/reverse?lat=${position.coords.latitude}&lon=${position.coords.longitude}&format=json`
-            );
-            const data = await res.json();
-            const state = data.address?.state || 'Unknown';
-            setJurisdiction(state);
-          } catch {
-            setJurisdiction('Unknown');
-          }
-        },
-        () => {
-          setJurisdiction('Unknown');
-        }
-      );
-    } else {
-      setJurisdiction('Unknown');
-    }
-  }, []);
-
-  const handleVerify = async () => {
-    if (!licenseNumber.trim()) {
-      setError('Please enter a license number.');
-      return;
-    }
-
-    setError('');
-    setLoading(true);
-    setResult(null);
-
-    try {
-      const res = await fetch('/api/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          licenseNumber: licenseNumber.trim(),
-          jurisdiction,
-        }),
-      });
-
-      const data = await res.json();
-      setResult(data);
-    } catch {
-      setError('Verification failed. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const statusColor = (status: string) => {
-    if (status === 'Active') return 'bg-green-100 border-green-500 text-green-800';
-    if (status === 'Not Active') return 'bg-yellow-100 border-yellow-500 text-yellow-800';
-    return 'bg-red-100 border-red-500 text-red-800';
-  };
-
-  return (
-    <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-gray-50">
-      <div className="w-full max-w-md">
-        <h1 className="text-2xl font-bold text-center mb-2">
-          Verify a Contractor License
-        </h1>
-        <p className="text-sm text-gray-500 text-center mb-6">
-          Enter the license number to check if it matches an official record.
-        </p>
-
-        {/* Jurisdiction field - auto-filled */}
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Jurisdiction
-        </label>
-        <input
-          type="text"
-          value={jurisdiction}
-          onChange={(e) => setJurisdiction(e.target.value)}
-          className="w-full border border-gray-300 rounded-lg px-4 py-3 mb-4 text-gray-800"
-        />
-
-        {/* License number field */}
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          License Number
-        </label>
-        <input
-          type="text"
-          value={licenseNumber}
-          onChange={(e) => setLicenseNumber(e.target.value)}
-          placeholder="Enter license number"
-          className="w-full border border-gray-300 rounded-lg px-4 py-3 mb-4 text-gray-800"
-        />
-
-        {error && (
-          <p className="text-red-600 text-sm mb-4">{error}</p>
-        )}
-
-        <button
-          onClick={handleVerify}
-          disabled={loading}
-          className="w-full bg-blue-600 text-white font-semibold rounded-lg px-4 py-3 hover:bg-blue-700 disabled:bg-blue-300"
-        >
-          {loading ? 'Verifying...' : 'Verify'}
-        </button>
-
-        {/* Result display */}
-        {result && (
-          <div className={`mt-6 border-2 rounded-lg p-4 ${statusColor(result.status)}`}>
-            <p className="text-lg font-bold mb-2">
-              {result.status === 'Active' && 'License Found — Active'}
-              {result.status === 'Not Active' && 'License Found — Not Active'}
-              {result.status === 'No Match' && 'No Matching Record Found'}
-            </p>
-            <div className="text-sm space-y-1">
-              <p><span className="font-medium">License:</span> {result.licenseNumber}</p>
-              <p><span className="font-medium">Name:</span> {result.name}</p>
-              <p><span className="font-medium">Jurisdiction:</span> {result.jurisdiction}</p>
-              <p><span className="font-medium">Expiration:</span> {result.expiration}</p>
-              <p><span className="font-medium">Source:</span> {result.source}</p>
-            </div>
-          </div>
-        )}
-
-        {result && (
-          <button
-            onClick={() => { setResult(null); setLicenseNumber(''); }}
-            className="w-full mt-4 border border-gray-300 rounded-lg px-4 py-3 text-gray-700 hover:bg-gray-100"
-          >
-            Check Another License
-          </button>
-        )}
-
-        <p className="text-xs text-gray-400 text-center mt-6">
-          Verification helps confirm whether a license record exists and is active. Always use your own judgment before hiring.
-        </p>
-      </div>
-    </main>
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.addAll(PRECACHE_URLS);
+    })
   );
-}
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames
+          .filter((name) => name !== CACHE_NAME)
+          .map((name) => caches.delete(name))
+      );
+    })
+  );
+  self.clients.claim();
+});
+
+self.addEventListener('fetch', (event) => {
+  // Only cache GET requests
+  if (event.request.method !== 'GET') return;
+
+  event.respondWith(
+    fetch(event.request)
+      .then((response) => {
+        // Clone and cache successful responses
+        const responseClone = response.clone();
+        caches.open(CACHE_NAME).then((cache) => {
+          cache.put(event.request, responseClone);
+        });
+        return response;
+      })
+      .catch(() => {
+        // If network fails, try cache
+        return caches.match(event.request).then((cached) => {
+          return cached || new Response('Offline', { status: 503 });
+        });
+      })
+  );
+});
 
 
 
-import { NextRequest, NextResponse } from 'next/server';
+import type { Metadata, Viewport } from 'next';
+import './globals.css';
 
-export async function POST(request: NextRequest) {
-  const body = await request.json();
-  const { licenseNumber, jurisdiction } = body;
+export const metadata: Metadata = {
+  title: 'Contractor License Verifier',
+  description: 'Verify a contractor license in under 60 seconds',
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'LicenseCheck',
+  },
+};
 
-  if (!licenseNumber) {
-    return NextResponse.json(
-      { error: 'License number is required' },
-      { status: 400 }
-    );
-  }
+export const viewport: Viewport = {
+  themeColor: '#2563eb',
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+};
 
-  // Simulated verification logic
-  // Replace this with real source lookup later
-  const simulated = getSimulatedResult(licenseNumber, jurisdiction);
-
-  return NextResponse.json(simulated);
-}
-
-function getSimulatedResult(licenseNumber: string, jurisdiction: string) {
-  // Simulated records for testing
-  const records: Record<string, {
-    status: string;
-    name: string;
-    expiration: string;
-    source: string;
-  }> = {
-    'ABC-12345': {
-      status: 'Active',
-      name: 'Smith Roofing LLC',
-      expiration: '2026-03-15',
-      source: 'State Contractor Board (simulated)',
-    },
-    'XYZ-99999': {
-      status: 'Not Active',
-      name: 'QuickFix Services',
-      expiration: '2023-11-01',
-      source: 'State Contractor Board (simulated)',
-    },
-  };
-
-  const record = records[licenseNumber.toUpperCase()];
-
-  if (record) {
-    return {
-      status: record.status,
-      name: record.name,
-      licenseNumber: licenseNumber.toUpperCase(),
-      jurisdiction,
-      expiration: record.expiration,
-      source: record.source,
-    };
-  }
-
-  return {
-    status: 'No Match',
-    name: '—',
-    licenseNumber,
-    jurisdiction,
-    expiration: '—',
-    source: 'State Contractor Board (simulated)',
-  };
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en">
+      <head>
+        <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+      </head>
+      <body>
+        {children}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              if ('serviceWorker' in navigator) {
+                window.addEventListener('load', () => {
+                  navigator.serviceWorker.register('/sw.js');
+                });
+              }
+            `,
+          }}
+        />
+      </body>
+    </html>
+  );
 }
