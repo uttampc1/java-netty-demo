@@ -1,90 +1,224 @@
-device_name,device_type,brand_model,os_or_firmware,connection_type,wired_or_wifi,primary_user,purpose,always_on,important_services,notes
-main-router,router,Netgear R7900P,router-firmware,LAN/WAN,wifi+ethernet,home,network gateway,yes,DHCP/DNS/NAT,remote management off; no manual port forwarding
-linux-nuc,mini-pc,Intel NUC,Debian/other Linux,LAN,ethernet,home,lab/server,yes,Docker,has Kali VMs
-imac-debian,desktop,iMac,Debian,LAN,ethernet,home,daily use or admin,depends,unknown,confirm services later
-kali-vm-1,virtual-machine,VM,Kali,virtual,virtual,home,security learning,no,security tools,lab use only
-roku,streaming-device,Roku,device-firmware,LAN,wifi,home,streaming,depends,unknown,normal home device
-macbook,laptop,MacBook,macOS,LAN,wifi,home,personal use,no,unknown,portable device
-iphone-1,phone,iPhone,iOS,LAN,wifi,personal,mobile device,no,unknown,add one row per phone if you want
-weather-station,iot-device,unknown,device-firmware,LAN,wifi,home,sprinkler/weather,yes,unknown,IoT device
+'use client';
+
+import { useState, useEffect } from 'react';
+
+export default function Home() {
+  const [licenseNumber, setLicenseNumber] = useState('');
+  const [jurisdiction, setJurisdiction] = useState('Detecting...');
+  const [result, setResult] = useState<null | {
+    status: string;
+    name: string;
+    licenseNumber: string;
+    jurisdiction: string;
+    expiration: string;
+    source: string;
+  }>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  // Auto-detect jurisdiction on load
+  useEffect(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          try {
+            const res = await fetch(
+              `https://nominatim.openstreetmap.org/reverse?lat=${position.coords.latitude}&lon=${position.coords.longitude}&format=json`
+            );
+            const data = await res.json();
+            const state = data.address?.state || 'Unknown';
+            setJurisdiction(state);
+          } catch {
+            setJurisdiction('Unknown');
+          }
+        },
+        () => {
+          setJurisdiction('Unknown');
+        }
+      );
+    } else {
+      setJurisdiction('Unknown');
+    }
+  }, []);
+
+  const handleVerify = async () => {
+    if (!licenseNumber.trim()) {
+      setError('Please enter a license number.');
+      return;
+    }
+
+    setError('');
+    setLoading(true);
+    setResult(null);
+
+    try {
+      const res = await fetch('/api/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          licenseNumber: licenseNumber.trim(),
+          jurisdiction,
+        }),
+      });
+
+      const data = await res.json();
+      setResult(data);
+    } catch {
+      setError('Verification failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const statusColor = (status: string) => {
+    if (status === 'Active') return 'bg-green-100 border-green-500 text-green-800';
+    if (status === 'Not Active') return 'bg-yellow-100 border-yellow-500 text-yellow-800';
+    return 'bg-red-100 border-red-500 text-red-800';
+  };
+
+  return (
+    <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-gray-50">
+      <div className="w-full max-w-md">
+        <h1 className="text-2xl font-bold text-center mb-2">
+          Verify a Contractor License
+        </h1>
+        <p className="text-sm text-gray-500 text-center mb-6">
+          Enter the license number to check if it matches an official record.
+        </p>
+
+        {/* Jurisdiction field - auto-filled */}
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Jurisdiction
+        </label>
+        <input
+          type="text"
+          value={jurisdiction}
+          onChange={(e) => setJurisdiction(e.target.value)}
+          className="w-full border border-gray-300 rounded-lg px-4 py-3 mb-4 text-gray-800"
+        />
+
+        {/* License number field */}
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          License Number
+        </label>
+        <input
+          type="text"
+          value={licenseNumber}
+          onChange={(e) => setLicenseNumber(e.target.value)}
+          placeholder="Enter license number"
+          className="w-full border border-gray-300 rounded-lg px-4 py-3 mb-4 text-gray-800"
+        />
+
+        {error && (
+          <p className="text-red-600 text-sm mb-4">{error}</p>
+        )}
+
+        <button
+          onClick={handleVerify}
+          disabled={loading}
+          className="w-full bg-blue-600 text-white font-semibold rounded-lg px-4 py-3 hover:bg-blue-700 disabled:bg-blue-300"
+        >
+          {loading ? 'Verifying...' : 'Verify'}
+        </button>
+
+        {/* Result display */}
+        {result && (
+          <div className={`mt-6 border-2 rounded-lg p-4 ${statusColor(result.status)}`}>
+            <p className="text-lg font-bold mb-2">
+              {result.status === 'Active' && 'License Found — Active'}
+              {result.status === 'Not Active' && 'License Found — Not Active'}
+              {result.status === 'No Match' && 'No Matching Record Found'}
+            </p>
+            <div className="text-sm space-y-1">
+              <p><span className="font-medium">License:</span> {result.licenseNumber}</p>
+              <p><span className="font-medium">Name:</span> {result.name}</p>
+              <p><span className="font-medium">Jurisdiction:</span> {result.jurisdiction}</p>
+              <p><span className="font-medium">Expiration:</span> {result.expiration}</p>
+              <p><span className="font-medium">Source:</span> {result.source}</p>
+            </div>
+          </div>
+        )}
+
+        {result && (
+          <button
+            onClick={() => { setResult(null); setLicenseNumber(''); }}
+            className="w-full mt-4 border border-gray-300 rounded-lg px-4 py-3 text-gray-700 hover:bg-gray-100"
+          >
+            Check Another License
+          </button>
+        )}
+
+        <p className="text-xs text-gray-400 text-center mt-6">
+          Verification helps confirm whether a license record exists and is active. Always use your own judgment before hiring.
+        </p>
+      </div>
+    </main>
+  );
+}
 
 
-02-diagrams/home-network-diagram-v1.md
-Internet
-  |
-ISP
-  |
-Netgear R7900P Router
-  |-- Ethernet --> Linux NUC
-  |                 |-- Kali VM(s)
-  |                 |-- Docker containers
-  |
-  |-- Ethernet --> iMac (Debian)
-  |
-  |-- Wi-Fi --> Roku
-  |-- Wi-Fi --> MacBook
-  |-- Wi-Fi --> iPhone(s)
-  |-- Wi-Fi --> Weather/Sprinkler Station
 
+import { NextRequest, NextResponse } from 'next/server';
 
-Optional improvement
-Add labels like:
+export async function POST(request: NextRequest) {
+  const body = await request.json();
+  const { licenseNumber, jurisdiction } = body;
 
-gateway
-wired devices
-wireless devices
-lab devices
-IoT devices
+  if (!licenseNumber) {
+    return NextResponse.json(
+      { error: 'License number is required' },
+      { status: 400 }
+    );
+  }
 
+  // Simulated verification logic
+  // Replace this with real source lookup later
+  const simulated = getSimulatedResult(licenseNumber, jurisdiction);
 
-01-notes/week-01-summary.md
-# Week 1 Summary
+  return NextResponse.json(simulated);
+}
 
-## Objective
-Build a simple understanding of my home network.
+function getSimulatedResult(licenseNumber: string, jurisdiction: string) {
+  // Simulated records for testing
+  const records: Record<string, {
+    status: string;
+    name: string;
+    expiration: string;
+    source: string;
+  }> = {
+    'ABC-12345': {
+      status: 'Active',
+      name: 'Smith Roofing LLC',
+      expiration: '2026-03-15',
+      source: 'State Contractor Board (simulated)',
+    },
+    'XYZ-99999': {
+      status: 'Not Active',
+      name: 'QuickFix Services',
+      expiration: '2023-11-01',
+      source: 'State Contractor Board (simulated)',
+    },
+  };
 
-## What I set up
-- Created project folders
-- Created initial asset inventory
-- Created first network diagram
+  const record = records[licenseNumber.toUpperCase()];
 
-## My current network in plain English
-My home network uses a Netgear R7900P router as the main gateway.
-Two Linux-based machines are connected via Ethernet: a Linux NUC and an iMac running Debian.
-The NUC also hosts Kali VM(s) and some Docker containers.
-Other devices connect over Wi-Fi, including a Roku, MacBook, iPhones, and a weather/sprinkler station.
+  if (record) {
+    return {
+      status: record.status,
+      name: record.name,
+      licenseNumber: licenseNumber.toUpperCase(),
+      jurisdiction,
+      expiration: record.expiration,
+      source: record.source,
+    };
+  }
 
-## What I know so far
-- Remote management is off
-- No manual port forwarding is configured
-- UPnP was on earlier and may now be off depending on my change
-- No obvious VPN or proxy-sharing software is in use
-- Docker exists on one Linux machine
-
-## What I do not know yet
-- Exact services running on each Linux host
-- Which ports are listening on each Linux machine
-- Whether any container is reachable from the LAN
-- Normal traffic patterns
-- Router log visibility
-
-## Questions for next week
-- What services are running on each Linux machine?
-- Which ports are open locally?
-- Which services are expected vs unexpected?
-
-01-notes/week-01-glossary.md
-Very short definitions
-LAN: your local home network
-WAN: the outside network/internet side
-router: device connecting your home network to the internet
-gateway: the device your local devices use to reach outside networks
-DHCP: gives devices local IP addresses automatically
-DNS: turns names like example.com into IP addresses
-NAT: lets many home devices share one public internet connection
-private IP: internal home-network address
-port: numbered entry point used by network services
-
-
-
-
+  return {
+    status: 'No Match',
+    name: '—',
+    licenseNumber,
+    jurisdiction,
+    expiration: '—',
+    source: 'State Contractor Board (simulated)',
+  };
+}
