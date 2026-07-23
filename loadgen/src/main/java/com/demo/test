@@ -1,4 +1,87 @@
-<p><span className="font-medium">Name:</span> {result.name}</p>
-{result.licenseType && result.licenseType !== '—' && (
-  <p><span className="font-medium">License Type:</span> {result.licenseType}</p>
-)}
+import * as cheerio from 'cheerio';
+
+const OCLS_URL = 'https://search.ccb.state.or.us/search/ocls_results.asp';
+
+export interface LocksmithResult {
+  found: boolean;
+  licenseNumber: string;
+  name: string;
+  status: string;
+  address: string;
+  expiration: string;
+}
+
+export async function searchOregonLocksmith(query: string): Promise<LocksmithResult> {
+  const searchQuery = query.replace(/OCLS$/i, '').trim();
+  const startTime = Date.now();
+
+  const formData = new URLSearchParams();
+  formData.append('search_criteria', searchQuery);
+
+  const res = await fetch(OCLS_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Referer': 'https://search.ccb.state.or.us/search/ocls_search.asp',
+    },
+    body: formData.toString(),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Locksmith search returned ${res.status}`);
+  }
+
+  const html = await res.text();
+  const result = parseResults(html, query);
+  const elapsed = Date.now() - startTime;
+
+  console.log(`[OCLS] Search "${query}" → ${result.found ? result.status : 'No Match'} (${elapsed}ms)`);
+
+  return result;
+}
+
+function parseResults(html: string, originalQuery: string): LocksmithResult {
+  const $ = cheerio.load(html);
+
+  const noResult: LocksmithResult = {
+    found: false,
+    licenseNumber: originalQuery,
+    name: '—',
+    status: 'No Match',
+    address: '—',
+    expiration: '',
+  };
+
+  // Look for table rows with OCLS data
+  let licenseNumber = '';
+  let status = '';
+  let name = '';
+
+  $('table tr').each((i, row) => {
+    if (i === 0) return; // skip header
+    const cells = $(row).find('td');
+    if (cells.length >= 3) {
+      const firstCell = cells.eq(0).text().trim();
+      if (firstCell.includes('OCLS') || /^\d+$/.test(firstCell)) {
+        licenseNumber = firstCell;
+        status = cells.eq(1).text().trim();
+        name = cells.eq(2).text().trim();
+        return false; // break
+      }
+    }
+  });
+
+  if (!licenseNumber) {
+    return noResult;
+  }
+
+  return {
+    found: true,
+    licenseNumber,
+    name,
+    status,
+    address: '—',
+    expiration: '',
+  };
+}
