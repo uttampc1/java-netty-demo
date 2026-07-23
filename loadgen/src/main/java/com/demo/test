@@ -13,12 +13,16 @@ export interface CCBResult {
 export async function searchOregonCCB(query: string): Promise<CCBResult> {
   const searchQuery = query.replace('#', '').trim();
 
+  console.log('[CCB] Starting search for:', searchQuery);
+
   // Step 1: GET the page to extract ASP.NET tokens
   const pageRes = await fetch(CCB_URL, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
     },
   });
+
+  console.log('[CCB] GET status:', pageRes.status);
 
   const pageHtml = await pageRes.text();
   const $page = cheerio.load(pageHtml);
@@ -27,7 +31,11 @@ export async function searchOregonCCB(query: string): Promise<CCBResult> {
   const viewStateGen = $page('input[name="__VIEWSTATEGENERATOR"]').val() as string;
   const eventValidation = $page('input[name="__EVENTVALIDATION"]').val() as string;
 
+  console.log('[CCB] ViewState found:', !!viewState);
+  console.log('[CCB] EventValidation found:', !!eventValidation);
+
   if (!viewState || !eventValidation) {
+    console.log('[CCB] Page HTML snippet:', pageHtml.substring(0, 500));
     throw new Error('Failed to extract form tokens from Oregon CCB page');
   }
 
@@ -53,7 +61,12 @@ export async function searchOregonCCB(query: string): Promise<CCBResult> {
     body: formData.toString(),
   });
 
+  console.log('[CCB] POST status:', searchRes.status);
+
   const resultHtml = await searchRes.text();
+
+  console.log('[CCB] Response length:', resultHtml.length);
+  console.log('[CCB] Response snippet:', resultHtml.substring(0, 1000));
 
   // Step 3: Parse results
   return parseSearchResults(resultHtml, searchQuery);
@@ -64,9 +77,12 @@ function parseSearchResults(html: string, originalQuery: string): CCBResult {
 
   // Check result count
   const countText = $('#MainContent_basicCountLabel').text().trim();
+  console.log('[CCB] Count label text:', JSON.stringify(countText));
+
   const count = parseInt(countText, 10);
 
   if (!count || count === 0) {
+    console.log('[CCB] No results found (count=0 or missing)');
     return {
       found: false,
       licenseNumber: originalQuery,
@@ -78,10 +94,17 @@ function parseSearchResults(html: string, originalQuery: string): CCBResult {
 
   // Parse the GridView table
   const table = $('#MainContent_GridView1');
-  const firstDataRow = table.find('tr').eq(1); // skip header row
+  console.log('[CCB] Table found:', table.length > 0);
+
+  const rows = table.find('tr');
+  console.log('[CCB] Table rows found:', rows.length);
+
+  const firstDataRow = rows.eq(1);
   const cells = firstDataRow.find('td');
+  console.log('[CCB] Cells in first data row:', cells.length);
 
   if (cells.length < 4) {
+    console.log('[CCB] Not enough cells in data row');
     return {
       found: false,
       licenseNumber: originalQuery,
@@ -91,193 +114,15 @@ function parseSearchResults(html: string, originalQuery: string): CCBResult {
     };
   }
 
-  return {
+  const result = {
     found: true,
     licenseNumber: cells.eq(0).text().trim(),
     name: cells.eq(1).text().trim(),
     status: cells.eq(2).text().trim(),
     address: cells.eq(3).text().trim(),
   };
-}
 
+  console.log('[CCB] Parsed result:', result);
 
-
-///
-
-import { NextRequest, NextResponse } from 'next/server';
-import { searchOregonCCB } from '@/lib/oregon-ccb';
-
-export async function POST(request: NextRequest) {
-  const body = await request.json();
-  const { licenseNumber, jurisdiction } = body;
-
-  if (!licenseNumber) {
-    return NextResponse.json(
-      { error: 'License number is required' },
-      { status: 400 }
-    );
-  }
-
-  const isOregon = jurisdiction?.toLowerCase().includes('oregon');
-
-  if (isOregon) {
-    return handleOregonLookup(licenseNumber, jurisdiction);
-  }
-
-  // Fall back to simulated data for other states
-  return NextResponse.json(getSimulatedResult(licenseNumber, jurisdiction));
-}
-
-async function handleOregonLookup(licenseNumber: string, jurisdiction: string) {
-  try {
-    const ccbResult = await searchOregonCCB(licenseNumber);
-
-    if (!ccbResult.found) {
-      return NextResponse.json({
-        status: 'No Match',
-        sourceStatus: '—',
-        name: '—',
-        licenseNumber,
-        jurisdiction,
-        sourceJurisdiction: '—',
-        jurisdictionMatch: false,
-        expiration: '—',
-        source: 'Oregon Construction Contractors Board',
-      });
-    }
-
-    const sourceStatus = ccbResult.status;
-    const negativeStatuses = ['Inactive', 'Suspended', 'Revoked', 'Expired'];
-    const isNegative = negativeStatuses.some(
-      (s) => sourceStatus.toLowerCase().includes(s.toLowerCase())
-    );
-
-    const jurisdictionMatch = jurisdiction.toLowerCase().includes('oregon');
-
-    let finalStatus: string;
-    if (isNegative) {
-      finalStatus = 'Not Active';
-    } else if (!jurisdictionMatch) {
-      finalStatus = 'Not Active';
-    } else {
-      finalStatus = 'Active';
-    }
-
-    return NextResponse.json({
-      status: finalStatus,
-      sourceStatus,
-      name: ccbResult.name,
-      licenseNumber: ccbResult.licenseNumber,
-      jurisdiction,
-      sourceJurisdiction: 'Oregon',
-      jurisdictionMatch,
-      expiration: 'See agency records',
-      source: 'Oregon Construction Contractors Board',
-    });
-  } catch (error) {
-    console.error('Oregon CCB lookup failed:', error);
-    return NextResponse.json(
-      {
-        status: 'No Match',
-        sourceStatus: 'Error',
-        name: '—',
-        licenseNumber,
-        jurisdiction,
-        sourceJurisdiction: '—',
-        jurisdictionMatch: false,
-        expiration: '—',
-        source: 'Oregon CCB (lookup failed)',
-      },
-      { status: 502 }
-    );
-  }
-}
-
-function getSimulatedResult(licenseNumber: string, jurisdiction: string) {
-  const records: Record<string, {
-    name: string;
-    sourceStatus: string;
-    sourceJurisdiction: string;
-    expiration: string;
-    source: string;
-  }> = {
-    'ABC-12345': {
-      name: 'Smith Roofing LLC',
-      sourceStatus: 'Active',
-      sourceJurisdiction: 'Florida',
-      expiration: '2026-03-15',
-      source: 'State Contractor Board (simulated)',
-    },
-    'XYZ-99999': {
-      name: 'QuickFix Services',
-      sourceStatus: 'Expired',
-      sourceJurisdiction: 'Florida',
-      expiration: '2023-11-01',
-      source: 'State Contractor Board (simulated)',
-    },
-    'LIC-55555': {
-      name: 'Reliable AC Pros',
-      sourceStatus: 'Active',
-      sourceJurisdiction: 'Texas',
-      expiration: '2027-12-31',
-      source: 'State Contractor Board (simulated)',
-    },
-    'SUS-77777': {
-      name: 'Shady Repairs Inc',
-      sourceStatus: 'Suspended',
-      sourceJurisdiction: 'California',
-      expiration: '2028-06-01',
-      source: 'State Contractor Board (simulated)',
-    },
-  };
-
-  const record = records[licenseNumber.toUpperCase()];
-
-  if (!record) {
-    return {
-      status: 'No Match',
-      sourceStatus: '—',
-      name: '—',
-      licenseNumber,
-      jurisdiction,
-      sourceJurisdiction: '—',
-      jurisdictionMatch: false,
-      expiration: '—',
-      source: 'State Contractor Board (simulated)',
-    };
-  }
-
-  const today = new Date();
-  const expDate = new Date(record.expiration);
-  const isExpired = expDate < today;
-
-  const negativeStatuses = ['Suspended', 'Revoked', 'Expired', 'Inactive'];
-  const isNegativeStatus = negativeStatuses.includes(record.sourceStatus);
-
-  const userJurisdiction = jurisdiction.trim().toLowerCase();
-  const sourceJurisdiction = record.sourceJurisdiction.trim().toLowerCase();
-  const jurisdictionMatch = userJurisdiction === sourceJurisdiction;
-
-  let finalStatus: string;
-  if (isNegativeStatus) {
-    finalStatus = 'Not Active';
-  } else if (isExpired) {
-    finalStatus = 'Not Active';
-  } else if (!jurisdictionMatch) {
-    finalStatus = 'Not Active';
-  } else {
-    finalStatus = 'Active';
-  }
-
-  return {
-    status: finalStatus,
-    sourceStatus: record.sourceStatus,
-    name: record.name,
-    licenseNumber: licenseNumber.toUpperCase(),
-    jurisdiction,
-    sourceJurisdiction: record.sourceJurisdiction,
-    jurisdictionMatch,
-    expiration: record.expiration,
-    source: record.source,
-  };
+  return result;
 }
