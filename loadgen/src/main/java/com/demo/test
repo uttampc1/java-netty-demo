@@ -1,4 +1,3 @@
-src/lib/oregon-home-inspector.ts
 import * as cheerio from 'cheerio';
 
 const OCHI_URL = 'https://search.ccb.state.or.us/search/ochi_search.aspx';
@@ -14,7 +13,6 @@ export interface HomeInspectorResult {
 
 export async function searchOregonHomeInspector(query: string): Promise<HomeInspectorResult> {
   const searchQuery = query.replace(/^HIC/i, '').trim();
-  const startTime = Date.now();
 
   const noResult: HomeInspectorResult = {
     found: false,
@@ -25,20 +23,75 @@ export async function searchOregonHomeInspector(query: string): Promise<HomeInsp
     expiration: '',
   };
 
-  // Step 1: GET the page to extract tokens and cookies
-  const pageRes = await fetch(OCHI_URL, {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const resultHtml = await doSearch(OCHI_URL, searchQuery);
+
+      const isResultsPage = resultHtml.includes('MainContent_inspectorCountLabel') ||
+                            resultHtml.includes('MainContent_GridView2');
+
+      if (!isResultsPage) {
+        if (attempt === 1) {
+          console.warn('[OCHI] POST returned form page, retrying...');
+          continue;
+        }
+        console.error('[OCHI] POST returned form page on retry');
+        return noResult;
+      }
+
+      const $ = cheerio.load(resultHtml);
+      const countText = $('#MainContent_inspectorCountLabel').text().trim();
+      const count = parseInt(countText, 10);
+
+      if (!count || count === 0) {
+        console.log(`[OCHI] Search "${searchQuery}" → No Match`);
+        return noResult;
+      }
+
+      const table = $('#MainContent_GridView2');
+      const firstDataRow = table.find('tr').eq(1);
+      const cells = firstDataRow.find('td');
+
+      if (cells.length < 3) {
+        console.log(`[OCHI] Search "${searchQuery}" → No Match (not enough cells)`);
+        return noResult;
+      }
+
+      const result: HomeInspectorResult = {
+        found: true,
+        licenseNumber: cells.eq(0).text().trim(),
+        name: cells.eq(1).text().trim(),
+        status: cells.eq(2).text().trim(),
+        address: cells.length >= 4 ? cells.eq(3).text().trim() : '—',
+        expiration: cells.length >= 5 ? cells.eq(4).text().trim() : '',
+      };
+
+      console.log(`[OCHI] Search "${searchQuery}" → ${result.status}`);
+      return result;
+
+    } catch (error) {
+      if (attempt === 1) {
+        console.warn('[OCHI] Attempt 1 failed, retrying:', error);
+        continue;
+      }
+      console.error('[OCHI] Search failed:', error);
+      return noResult;
+    }
+  }
+
+  return noResult;
+}
+
+async function doSearch(url: string, query: string): Promise<string> {
+  const pageRes = await fetch(url, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     },
   });
 
-  if (!pageRes.ok) {
-    console.error('[OCHI] GET failed:', pageRes.status);
-    throw new Error(`OCHI page returned ${pageRes.status}`);
-  }
+  if (!pageRes.ok) throw new Error(`GET ${url} returned ${pageRes.status}`);
 
-  // Extract cookies
   let cookieString = '';
   try {
     const setCookies = pageRes.headers.getSetCookie();
@@ -58,11 +111,9 @@ export async function searchOregonHomeInspector(query: string): Promise<HomeInsp
   const eventValidation = $page('input[name="__EVENTVALIDATION"]').val() as string;
 
   if (!viewState || !eventValidation) {
-    console.error('[OCHI] Failed to extract form tokens');
-    throw new Error('Failed to extract form tokens from OCHI page');
+    throw new Error('Failed to extract form tokens');
   }
 
-  // Step 2: POST the search
   const formData = new URLSearchParams();
   formData.append('__EVENTTARGET', '');
   formData.append('__EVENTARGUMENT', '');
@@ -70,7 +121,7 @@ export async function searchOregonHomeInspector(query: string): Promise<HomeInsp
   formData.append('__VIEWSTATEGENERATOR', viewStateGen || '');
   formData.append('__EVENTVALIDATION', eventValidation);
   formData.append('ctl00$MainContent$activeToggle', 'All');
-  formData.append('ctl00$MainContent$searchBox', searchQuery);
+  formData.append('ctl00$MainContent$searchBox', query);
   formData.append('ctl00$MainContent$submitbtn', 'Search');
   formData.append('reCaptchaToken', '');
 
@@ -78,7 +129,7 @@ export async function searchOregonHomeInspector(query: string): Promise<HomeInsp
     'Content-Type': 'application/x-www-form-urlencoded',
     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Referer': OCHI_URL,
+    'Referer': url,
     'Origin': 'https://search.ccb.state.or.us',
   };
 
@@ -86,185 +137,163 @@ export async function searchOregonHomeInspector(query: string): Promise<HomeInsp
     postHeaders['Cookie'] = cookieString;
   }
 
-  const searchRes = await fetch(OCHI_URL, {
+  const searchRes = await fetch(url, {
     method: 'POST',
     headers: postHeaders,
     body: formData.toString(),
   });
 
-  if (!searchRes.ok) {
-    console.error('[OCHI] POST failed:', searchRes.status);
-    throw new Error(`OCHI search returned ${searchRes.status}`);
-  }
+  if (!searchRes.ok) throw new Error(`POST ${url} returned ${searchRes.status}`);
 
-  const resultHtml = await searchRes.text();
-
-  // Step 3: Parse results
-  const $ = cheerio.load(resultHtml);
-
-  const countText = $('#MainContent_basicCountLabel').text().trim();
-  const count = parseInt(countText, 10);
-
-  if (!count || count === 0) {
-    const elapsed = Date.now() - startTime;
-    console.log(`[OCHI] Search "${searchQuery}" → No Match (${elapsed}ms)`);
-    return noResult;
-  }
-
-  const table = $('#MainContent_GridView1');
-  const firstDataRow = table.find('tr').eq(1);
-  const cells = firstDataRow.find('td');
-
-  if (cells.length < 3) {
-    const elapsed = Date.now() - startTime;
-    console.log(`[OCHI] Search "${searchQuery}" → No Match (not enough cells) (${elapsed}ms)`);
-    return noResult;
-  }
-
-  const result: HomeInspectorResult = {
-    found: true,
-    licenseNumber: cells.eq(0).text().trim(),
-    name: cells.eq(1).text().trim(),
-    status: cells.eq(2).text().trim(),
-    address: cells.length >= 4 ? cells.eq(3).text().trim() : '—',
-    expiration: cells.length >= 5 ? cells.eq(4).text().trim() : '',
-  };
-
-  const elapsed = Date.now() - startTime;
-  console.log(`[OCHI] Search "${searchQuery}" → ${result.status} (${elapsed}ms)`);
-
-  return result;
+  return searchRes.text();
 }
 
 ///
-src/lib/oregon-search.ts
-Replace the entire file:
+import * as cheerio from 'cheerio';
 
-import { searchOregonCCB } from './oregon-ccb';
-import { searchOregonLocksmith } from './oregon-locksmith';
-import { searchOregonHomeInspector } from './oregon-home-inspector';
+const CCB_URL = 'https://search.ccb.state.or.us/search/default.aspx';
 
-export interface OregonSearchResult {
+export interface CCBResult {
   found: boolean;
   licenseNumber: string;
   name: string;
   status: string;
   address: string;
   expiration: string;
-  licenseType: string;
 }
 
-export async function searchOregon(query: string): Promise<OregonSearchResult> {
-  const trimmed = query.trim();
+export async function searchOregonCCB(query: string): Promise<CCBResult> {
+  const searchQuery = query.replace('#', '').trim();
 
-  // Route by format
-  if (/OCLS$/i.test(trimmed)) {
-    return searchAsLocksmith(trimmed);
-  }
-
-  if (/^HIC/i.test(trimmed)) {
-    return searchAsHomeInspector(trimmed);
-  }
-
-  // Plain digits or other format — cascade
-  // 1. General contractor (most common)
-  const ccbResult = await searchOregonCCB(trimmed);
-  if (ccbResult.found) {
-    return {
-      found: true,
-      licenseNumber: ccbResult.licenseNumber,
-      name: ccbResult.name,
-      status: ccbResult.status,
-      address: ccbResult.address,
-      expiration: ccbResult.expiration,
-      licenseType: 'General Contractor',
-    };
-  }
-
-  // 2. Locksmith
-  const locksmithResult = await searchOregonLocksmith(trimmed);
-  if (locksmithResult.found) {
-    return {
-      found: true,
-      licenseNumber: locksmithResult.licenseNumber,
-      name: locksmithResult.name,
-      status: locksmithResult.status,
-      address: locksmithResult.address,
-      expiration: locksmithResult.expiration,
-      licenseType: 'Certified Locksmith',
-    };
-  }
-
-  // 3. Home Inspector
-  const inspectorResult = await searchOregonHomeInspector(trimmed);
-  if (inspectorResult.found) {
-    return {
-      found: true,
-      licenseNumber: inspectorResult.licenseNumber,
-      name: inspectorResult.name,
-      status: inspectorResult.status,
-      address: inspectorResult.address,
-      expiration: inspectorResult.expiration,
-      licenseType: 'Certified Home Inspector',
-    };
-  }
-
-  // Nothing found
-  return {
+  const noResult: CCBResult = {
     found: false,
-    licenseNumber: trimmed,
+    licenseNumber: searchQuery,
     name: '—',
     status: 'No Match',
     address: '—',
     expiration: '',
-    licenseType: '—',
   };
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const resultHtml = await doSearch(CCB_URL, searchQuery);
+
+      const isResultsPage = resultHtml.includes('MainContent_basicCountLabel') ||
+                            resultHtml.includes('SearchCount');
+
+      if (!isResultsPage) {
+        if (attempt === 1) {
+          console.warn('[CCB] POST returned form page, retrying...');
+          continue;
+        }
+        console.error('[CCB] POST returned form page on retry');
+        return noResult;
+      }
+
+      const $ = cheerio.load(resultHtml);
+      const countText = $('#MainContent_basicCountLabel').text().trim();
+      const count = parseInt(countText, 10);
+
+      if (!count || count === 0) {
+        console.log(`[CCB] Search "${searchQuery}" → No Match`);
+        return noResult;
+      }
+
+      const table = $('#MainContent_GridView1');
+      const firstDataRow = table.find('tr').eq(1);
+      const cells = firstDataRow.find('td');
+
+      if (cells.length < 4) {
+        return noResult;
+      }
+
+      const result: CCBResult = {
+        found: true,
+        licenseNumber: cells.eq(0).text().trim(),
+        name: cells.eq(1).text().trim(),
+        status: cells.eq(2).text().trim(),
+        address: cells.eq(3).text().trim(),
+        expiration: cells.length >= 5 ? cells.eq(4).text().trim() : '',
+      };
+
+      console.log(`[CCB] Search "${searchQuery}" → ${result.status}`);
+      return result;
+
+    } catch (error) {
+      if (attempt === 1) {
+        console.warn('[CCB] Attempt 1 failed, retrying:', error);
+        continue;
+      }
+      console.error('[CCB] Search failed:', error);
+      return noResult;
+    }
+  }
+
+  return noResult;
 }
 
-async function searchAsLocksmith(query: string): Promise<OregonSearchResult> {
-  const result = await searchOregonLocksmith(query);
-  if (result.found) {
-    return {
-      found: true,
-      licenseNumber: result.licenseNumber,
-      name: result.name,
-      status: result.status,
-      address: result.address,
-      expiration: result.expiration,
-      licenseType: 'Certified Locksmith',
-    };
-  }
-  return {
-    found: false,
-    licenseNumber: query,
-    name: '—',
-    status: 'No Match',
-    address: '—',
-    expiration: '',
-    licenseType: '—',
-  };
-}
+async function doSearch(url: string, query: string): Promise<string> {
+  const pageRes = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    },
+  });
 
-async function searchAsHomeInspector(query: string): Promise<OregonSearchResult> {
-  const result = await searchOregonHomeInspector(query);
-  if (result.found) {
-    return {
-      found: true,
-      licenseNumber: result.licenseNumber,
-      name: result.name,
-      status: result.status,
-      address: result.address,
-      expiration: result.expiration,
-      licenseType: 'Certified Home Inspector',
-    };
+  if (!pageRes.ok) throw new Error(`GET ${url} returned ${pageRes.status}`);
+
+  let cookieString = '';
+  try {
+    const setCookies = pageRes.headers.getSetCookie();
+    cookieString = setCookies.map((c: string) => c.split(';')[0]).join('; ');
+  } catch {
+    const raw = pageRes.headers.get('set-cookie');
+    if (raw) {
+      cookieString = raw.split(',').map((c: string) => c.split(';')[0].trim()).join('; ');
+    }
   }
-  return {
-    found: false,
-    licenseNumber: query,
-    name: '—',
-    status: 'No Match',
-    address: '—',
-    expiration: '',
-    licenseType: '—',
+
+  const pageHtml = await pageRes.text();
+  const $page = cheerio.load(pageHtml);
+
+  const viewState = $page('input[name="__VIEWSTATE"]').val() as string;
+  const viewStateGen = $page('input[name="__VIEWSTATEGENERATOR"]').val() as string;
+  const eventValidation = $page('input[name="__EVENTVALIDATION"]').val() as string;
+
+  if (!viewState || !eventValidation) {
+    throw new Error('Failed to extract form tokens');
+  }
+
+  const formData = new URLSearchParams();
+  formData.append('__EVENTTARGET', '');
+  formData.append('__EVENTARGUMENT', '');
+  formData.append('__VIEWSTATE', viewState);
+  formData.append('__VIEWSTATEGENERATOR', viewStateGen || '');
+  formData.append('__EVENTVALIDATION', eventValidation);
+  formData.append('ctl00$MainContent$activeToggle', 'All');
+  formData.append('ctl00$MainContent$searchBox', query);
+  formData.append('ctl00$MainContent$submitbtn', 'Search');
+  formData.append('reCaptchaToken', '');
+
+  const postHeaders: Record<string, string> = {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Referer': url,
+    'Origin': 'https://search.ccb.state.or.us',
   };
+
+  if (cookieString) {
+    postHeaders['Cookie'] = cookieString;
+  }
+
+  const searchRes = await fetch(url, {
+    method: 'POST',
+    headers: postHeaders,
+    body: formData.toString(),
+  });
+
+  if (!searchRes.ok) throw new Error(`POST ${url} returned ${searchRes.status}`);
+
+  return searchRes.text();
 }
