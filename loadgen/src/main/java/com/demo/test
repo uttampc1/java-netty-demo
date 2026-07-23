@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio';
 
-const CCB_URL = 'https://search.ccb.state.or.us/search/';
+const CCB_URL = 'https://search.ccb.state.or.us/search/default.aspx';
 
 export interface CCBResult {
   found: boolean;
@@ -15,14 +15,29 @@ export async function searchOregonCCB(query: string): Promise<CCBResult> {
 
   console.log('[CCB] Starting search for:', searchQuery);
 
-  // Step 1: GET the page to extract ASP.NET tokens
+  // Step 1: GET the page to extract tokens and cookies
   const pageRes = await fetch(CCB_URL, {
     headers: {
-      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
+      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     },
   });
 
   console.log('[CCB] GET status:', pageRes.status);
+
+  // Extract cookies
+  let cookieString = '';
+  try {
+    const setCookies = pageRes.headers.getSetCookie();
+    cookieString = setCookies.map((c: string) => c.split(';')[0]).join('; ');
+    console.log('[CCB] Cookies received:', setCookies.length, cookieString);
+  } catch {
+    const raw = pageRes.headers.get('set-cookie');
+    if (raw) {
+      cookieString = raw.split(',').map((c: string) => c.split(';')[0].trim()).join('; ');
+      console.log('[CCB] Fallback cookies:', cookieString);
+    }
+  }
 
   const pageHtml = await pageRes.text();
   const $page = cheerio.load(pageHtml);
@@ -31,15 +46,14 @@ export async function searchOregonCCB(query: string): Promise<CCBResult> {
   const viewStateGen = $page('input[name="__VIEWSTATEGENERATOR"]').val() as string;
   const eventValidation = $page('input[name="__EVENTVALIDATION"]').val() as string;
 
-  console.log('[CCB] ViewState found:', !!viewState);
+  console.log('[CCB] ViewState found:', !!viewState, 'length:', viewState?.length);
   console.log('[CCB] EventValidation found:', !!eventValidation);
 
   if (!viewState || !eventValidation) {
-    console.log('[CCB] Page HTML snippet:', pageHtml.substring(0, 500));
     throw new Error('Failed to extract form tokens from Oregon CCB page');
   }
 
-  // Step 2: POST the search
+  // Step 2: POST the search with cookies
   const formData = new URLSearchParams();
   formData.append('__EVENTTARGET', '');
   formData.append('__EVENTARGUMENT', '');
@@ -51,13 +65,21 @@ export async function searchOregonCCB(query: string): Promise<CCBResult> {
   formData.append('ctl00$MainContent$submitbtn', 'Search');
   formData.append('reCaptchaToken', '');
 
+  const postHeaders: Record<string, string> = {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Referer': CCB_URL,
+    'Origin': 'https://search.ccb.state.or.us',
+  };
+
+  if (cookieString) {
+    postHeaders['Cookie'] = cookieString;
+  }
+
   const searchRes = await fetch(CCB_URL, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
-      'Referer': CCB_URL,
-    },
+    headers: postHeaders,
     body: formData.toString(),
   });
 
@@ -66,7 +88,8 @@ export async function searchOregonCCB(query: string): Promise<CCBResult> {
   const resultHtml = await searchRes.text();
 
   console.log('[CCB] Response length:', resultHtml.length);
-  console.log('[CCB] Response snippet:', resultHtml.substring(0, 1000));
+  console.log('[CCB] Contains GridView:', resultHtml.includes('MainContent_GridView1'));
+  console.log('[CCB] Contains CountLabel:', resultHtml.includes('MainContent_basicCountLabel'));
 
   // Step 3: Parse results
   return parseSearchResults(resultHtml, searchQuery);
@@ -75,14 +98,13 @@ export async function searchOregonCCB(query: string): Promise<CCBResult> {
 function parseSearchResults(html: string, originalQuery: string): CCBResult {
   const $ = cheerio.load(html);
 
-  // Check result count
   const countText = $('#MainContent_basicCountLabel').text().trim();
   console.log('[CCB] Count label text:', JSON.stringify(countText));
 
   const count = parseInt(countText, 10);
 
   if (!count || count === 0) {
-    console.log('[CCB] No results found (count=0 or missing)');
+    console.log('[CCB] No results found');
     return {
       found: false,
       licenseNumber: originalQuery,
@@ -92,19 +114,14 @@ function parseSearchResults(html: string, originalQuery: string): CCBResult {
     };
   }
 
-  // Parse the GridView table
   const table = $('#MainContent_GridView1');
-  console.log('[CCB] Table found:', table.length > 0);
-
-  const rows = table.find('tr');
-  console.log('[CCB] Table rows found:', rows.length);
-
-  const firstDataRow = rows.eq(1);
+  const firstDataRow = table.find('tr').eq(1);
   const cells = firstDataRow.find('td');
-  console.log('[CCB] Cells in first data row:', cells.length);
+
+  console.log('[CCB] Table found:', table.length > 0);
+  console.log('[CCB] Cells found:', cells.length);
 
   if (cells.length < 4) {
-    console.log('[CCB] Not enough cells in data row');
     return {
       found: false,
       licenseNumber: originalQuery,
