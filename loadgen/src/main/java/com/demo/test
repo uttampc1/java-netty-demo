@@ -1,8 +1,9 @@
+src/lib/oregon-lead-safe.ts
 import * as cheerio from 'cheerio';
 
-const OCHI_URL = 'https://search.ccb.state.or.us/search/ochi_search.aspx';
+const LBP_URL = 'https://search.ccb.state.or.us/search/lbp_search.aspx';
 
-export interface HomeInspectorResult {
+export interface LeadSafeResult {
   found: boolean;
   licenseNumber: string;
   name: string;
@@ -11,10 +12,10 @@ export interface HomeInspectorResult {
   expiration: string;
 }
 
-export async function searchOregonHomeInspector(query: string): Promise<HomeInspectorResult> {
-  const searchQuery = query.replace(/^HIC/i, '').trim();
+export async function searchOregonLeadSafe(query: string): Promise<LeadSafeResult> {
+  const searchQuery = query.trim();
 
-  const noResult: HomeInspectorResult = {
+  const noResult: LeadSafeResult = {
     found: false,
     licenseNumber: searchQuery,
     name: '—',
@@ -25,56 +26,56 @@ export async function searchOregonHomeInspector(query: string): Promise<HomeInsp
 
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const resultHtml = await doSearch(OCHI_URL, searchQuery);
+      const resultHtml = await doSearch(LBP_URL, searchQuery);
 
-      const isResultsPage = resultHtml.includes('MainContent_inspectorCountLabel') ||
-                            resultHtml.includes('MainContent_GridView2');
+      const isResultsPage = resultHtml.includes('MainContent_basicCountLabel') ||
+                            resultHtml.includes('SearchCount');
 
       if (!isResultsPage) {
         if (attempt === 1) {
-          console.warn('[OCHI] POST returned form page, retrying...');
+          console.warn('[LBP] POST returned form page, retrying...');
           continue;
         }
-        console.error('[OCHI] POST returned form page on retry');
+        console.error('[LBP] POST returned form page on retry');
         return noResult;
       }
 
       const $ = cheerio.load(resultHtml);
-      const countText = $('#MainContent_inspectorCountLabel').text().trim();
+      const countText = $('#MainContent_basicCountLabel').text().trim();
       const count = parseInt(countText, 10);
 
       if (!count || count === 0) {
-        console.log(`[OCHI] Search "${searchQuery}" → No Match`);
+        console.log(`[LBP] Search "${searchQuery}" → No Match`);
         return noResult;
       }
 
-      const table = $('#MainContent_GridView2');
+      const table = $('#MainContent_GridView1');
       const firstDataRow = table.find('tr').eq(1);
       const cells = firstDataRow.find('td');
 
-      if (cells.length < 3) {
-        console.log(`[OCHI] Search "${searchQuery}" → No Match (not enough cells)`);
+      if (cells.length < 4) {
+        console.log(`[LBP] Search "${searchQuery}" → No Match (not enough cells)`);
         return noResult;
       }
 
-      const result: HomeInspectorResult = {
+      const result: LeadSafeResult = {
         found: true,
         licenseNumber: cells.eq(0).text().trim(),
         name: cells.eq(1).text().trim(),
         status: cells.eq(2).text().trim(),
-        address: cells.length >= 4 ? cells.eq(3).text().trim() : '—',
+        address: cells.eq(3).text().trim(),
         expiration: cells.length >= 5 ? cells.eq(4).text().trim() : '',
       };
 
-      console.log(`[OCHI] Search "${searchQuery}" → ${result.status}`);
+      console.log(`[LBP] Search "${searchQuery}" → ${result.status}`);
       return result;
 
     } catch (error) {
       if (attempt === 1) {
-        console.warn('[OCHI] Attempt 1 failed, retrying:', error);
+        console.warn('[LBP] Attempt 1 failed, retrying:', error);
         continue;
       }
-      console.error('[OCHI] Search failed:', error);
+      console.error('[LBP] Search failed:', error);
       return noResult;
     }
   }
@@ -120,7 +121,6 @@ async function doSearch(url: string, query: string): Promise<string> {
   formData.append('__VIEWSTATE', viewState);
   formData.append('__VIEWSTATEGENERATOR', viewStateGen || '');
   formData.append('__EVENTVALIDATION', eventValidation);
-  formData.append('ctl00$MainContent$activeToggle', 'All');
   formData.append('ctl00$MainContent$searchBox', query);
   formData.append('ctl00$MainContent$submitbtn', 'Search');
   formData.append('reCaptchaToken', '');
@@ -149,151 +149,95 @@ async function doSearch(url: string, query: string): Promise<string> {
 }
 
 ///
-import * as cheerio from 'cheerio';
+import { searchOregonCCB } from './oregon-ccb';
+import { searchOregonLocksmith } from './oregon-locksmith';
+import { searchOregonHomeInspector } from './oregon-home-inspector';
+import { searchOregonLeadSafe } from './oregon-lead-safe';
 
-const CCB_URL = 'https://search.ccb.state.or.us/search/default.aspx';
-
-export interface CCBResult {
+export interface OregonSearchResult {
   found: boolean;
   licenseNumber: string;
   name: string;
   status: string;
   address: string;
   expiration: string;
+  licenseType: string;
 }
 
-export async function searchOregonCCB(query: string): Promise<CCBResult> {
-  const searchQuery = query.replace('#', '').trim();
+export async function searchOregon(query: string): Promise<OregonSearchResult> {
+  const trimmed = query.trim();
 
-  const noResult: CCBResult = {
+  // Route by format
+  if (/OCLS$/i.test(trimmed)) {
+    return searchAsType(searchOregonLocksmith, trimmed, 'Certified Locksmith');
+  }
+
+  if (/^HIC/i.test(trimmed)) {
+    return searchAsType(searchOregonHomeInspector, trimmed, 'Certified Home Inspector');
+  }
+
+  // Plain digits or other format — cascade
+  const cascade: Array<{
+    fn: (q: string) => Promise<{ found: boolean; licenseNumber: string; name: string; status: string; address: string; expiration: string }>;
+    type: string;
+  }> = [
+    { fn: searchOregonCCB, type: 'General Contractor' },
+    { fn: searchOregonLocksmith, type: 'Certified Locksmith' },
+    { fn: searchOregonHomeInspector, type: 'Certified Home Inspector' },
+    { fn: searchOregonLeadSafe, type: 'Lead Safe Contractor' },
+  ];
+
+  for (const { fn, type } of cascade) {
+    const result = await fn(trimmed);
+    if (result.found) {
+      return {
+        found: true,
+        licenseNumber: result.licenseNumber,
+        name: result.name,
+        status: result.status,
+        address: result.address,
+        expiration: result.expiration,
+        licenseType: type,
+      };
+    }
+  }
+
+  // Nothing found
+  return {
     found: false,
-    licenseNumber: searchQuery,
+    licenseNumber: trimmed,
     name: '—',
     status: 'No Match',
     address: '—',
     expiration: '',
+    licenseType: '—',
   };
-
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    try {
-      const resultHtml = await doSearch(CCB_URL, searchQuery);
-
-      const isResultsPage = resultHtml.includes('MainContent_basicCountLabel') ||
-                            resultHtml.includes('SearchCount');
-
-      if (!isResultsPage) {
-        if (attempt === 1) {
-          console.warn('[CCB] POST returned form page, retrying...');
-          continue;
-        }
-        console.error('[CCB] POST returned form page on retry');
-        return noResult;
-      }
-
-      const $ = cheerio.load(resultHtml);
-      const countText = $('#MainContent_basicCountLabel').text().trim();
-      const count = parseInt(countText, 10);
-
-      if (!count || count === 0) {
-        console.log(`[CCB] Search "${searchQuery}" → No Match`);
-        return noResult;
-      }
-
-      const table = $('#MainContent_GridView1');
-      const firstDataRow = table.find('tr').eq(1);
-      const cells = firstDataRow.find('td');
-
-      if (cells.length < 4) {
-        return noResult;
-      }
-
-      const result: CCBResult = {
-        found: true,
-        licenseNumber: cells.eq(0).text().trim(),
-        name: cells.eq(1).text().trim(),
-        status: cells.eq(2).text().trim(),
-        address: cells.eq(3).text().trim(),
-        expiration: cells.length >= 5 ? cells.eq(4).text().trim() : '',
-      };
-
-      console.log(`[CCB] Search "${searchQuery}" → ${result.status}`);
-      return result;
-
-    } catch (error) {
-      if (attempt === 1) {
-        console.warn('[CCB] Attempt 1 failed, retrying:', error);
-        continue;
-      }
-      console.error('[CCB] Search failed:', error);
-      return noResult;
-    }
-  }
-
-  return noResult;
 }
 
-async function doSearch(url: string, query: string): Promise<string> {
-  const pageRes = await fetch(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    },
-  });
-
-  if (!pageRes.ok) throw new Error(`GET ${url} returned ${pageRes.status}`);
-
-  let cookieString = '';
-  try {
-    const setCookies = pageRes.headers.getSetCookie();
-    cookieString = setCookies.map((c: string) => c.split(';')[0]).join('; ');
-  } catch {
-    const raw = pageRes.headers.get('set-cookie');
-    if (raw) {
-      cookieString = raw.split(',').map((c: string) => c.split(';')[0].trim()).join('; ');
-    }
+async function searchAsType(
+  fn: (q: string) => Promise<{ found: boolean; licenseNumber: string; name: string; status: string; address: string; expiration: string }>,
+  query: string,
+  type: string
+): Promise<OregonSearchResult> {
+  const result = await fn(query);
+  if (result.found) {
+    return {
+      found: true,
+      licenseNumber: result.licenseNumber,
+      name: result.name,
+      status: result.status,
+      address: result.address,
+      expiration: result.expiration,
+      licenseType: type,
+    };
   }
-
-  const pageHtml = await pageRes.text();
-  const $page = cheerio.load(pageHtml);
-
-  const viewState = $page('input[name="__VIEWSTATE"]').val() as string;
-  const viewStateGen = $page('input[name="__VIEWSTATEGENERATOR"]').val() as string;
-  const eventValidation = $page('input[name="__EVENTVALIDATION"]').val() as string;
-
-  if (!viewState || !eventValidation) {
-    throw new Error('Failed to extract form tokens');
-  }
-
-  const formData = new URLSearchParams();
-  formData.append('__EVENTTARGET', '');
-  formData.append('__EVENTARGUMENT', '');
-  formData.append('__VIEWSTATE', viewState);
-  formData.append('__VIEWSTATEGENERATOR', viewStateGen || '');
-  formData.append('__EVENTVALIDATION', eventValidation);
-  formData.append('ctl00$MainContent$activeToggle', 'All');
-  formData.append('ctl00$MainContent$searchBox', query);
-  formData.append('ctl00$MainContent$submitbtn', 'Search');
-  formData.append('reCaptchaToken', '');
-
-  const postHeaders: Record<string, string> = {
-    'Content-Type': 'application/x-www-form-urlencoded',
-    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Referer': url,
-    'Origin': 'https://search.ccb.state.or.us',
+  return {
+    found: false,
+    licenseNumber: query,
+    name: '—',
+    status: 'No Match',
+    address: '—',
+    expiration: '',
+    licenseType: '—',
   };
-
-  if (cookieString) {
-    postHeaders['Cookie'] = cookieString;
-  }
-
-  const searchRes = await fetch(url, {
-    method: 'POST',
-    headers: postHeaders,
-    body: formData.toString(),
-  });
-
-  if (!searchRes.ok) throw new Error(`POST ${url} returned ${searchRes.status}`);
-
-  return searchRes.text();
 }
